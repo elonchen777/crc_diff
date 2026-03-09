@@ -3,7 +3,7 @@
 # Usage:
 #   Rscript maaslin.r --features dataset/maaslin_features.tsv --meta dataset/maaslin_metadata.tsv --outdir results
 
-outdir <- "results"
+outdir <- "results/maaslin2"
 
 if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE)
 
@@ -32,7 +32,7 @@ meta <- meta[common, , drop = FALSE]
 
 # Example: choose covariates from metadata (use all columns except those you want to exclude)
 message("Preparing covariates...")
-covariates <- c("smoke", "age", "gender")
+covariates <- c("age", "gender_label","diff_stage")
 
 message("Running MaAsLin2 analysis...")
 fit <- Maaslin2(
@@ -40,10 +40,12 @@ fit <- Maaslin2(
 	input_metadata = as.data.frame(meta),
 	output = outdir,
 	fixed_effects = covariates,
-   reference = c("smoke,0"),
+   reference = c("diff_stage,0"),
 	transform = "LOG",
 	normalization = "TSS",
    correction = "BH",
-   min_prevalence = 0.1
+   min_prevalence = 0.1,
+   plot_heatmap = FALSE,
+   plot_scatter = FALSE
 )
 

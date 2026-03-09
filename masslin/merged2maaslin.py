@@ -17,6 +17,24 @@ import sys
 
 import pandas as pd
 
+def prepare_crc_diff_groups(df: pd.DataFrame) -> pd.DataFrame:
+    def _label(row):
+        crc = int(row.get('crc_label', 0))
+        diff = int(row.get('differentiation', 0))
+        
+        # Only consider CRC patients (crc_label == 1)
+        if crc == 1:
+            if diff == 1:
+                return f'CRC_poordiff'
+            else:
+                return f'CRC_welldiff'
+        else:
+            return f'CTRL'
+    
+    df = df.copy()
+    df['group'] = df.apply(_label, axis=1)
+    df = df[df['group'].notna()].copy()
+    return df
 
 def _clean_names(cols):
     """Sanitize column names: remove tabs/newlines and make unique."""
@@ -76,9 +94,9 @@ def main():
         print(f"可用列: {df.columns.tolist()[:20]}...")
     
     # 只保留 CRC 患者数据 (crc_label = 1)
-    print("\n筛选 CRC 患者数据 (crc_label = 1)...")
-    df = df[df['crc_label'] == 1].copy()
-    print(f"筛选后数据形状: {df.shape}")
+    # print("\n筛选 CRC 患者数据 (crc_label = 1)...")
+    # df = df[df['crc_label'] == 1].copy()
+    # print(f"筛选后数据形状: {df.shape}")
     
     # 提取分类学特征列 (tax_ 开头的列)
     taxonomy_cols = [c for c in df.columns if c.startswith('tax_')]
@@ -106,7 +124,12 @@ def main():
     # 准备元数据
     # 选择用于 Maaslin 分析的协变量
     metadata_cols = ['SAMPLE_ID', 'group', 'age', 'gender_label', 'crc_label', 
-                     'tnm_stage', 'smoking_label','differentiation']
+                     'tnm_stage', 'smoking_label','differentiation','diff_stage']
+    
+    # 准备分组列
+    df = prepare_crc_diff_groups(df)
+
+    df['diff_stage'] = df['group'].map({'CRC_poordiff': '2', 'CRC_welldiff': '1', 'CTRL': '0'})
     
     # 只保留存在的列
     available_meta_cols = [c for c in metadata_cols if c in df.columns]
