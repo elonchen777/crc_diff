@@ -1,3 +1,10 @@
-.zig-cache/
-zig-out/
-*.o
+dataset/*
+figures/*
+pastpy/*
+masslin/results/*
+__pycache__/*
+results/*
+.Rproj.user
+.RData
+.Rhistory
+*.Rproj
