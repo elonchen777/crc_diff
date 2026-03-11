@@ -57,6 +57,7 @@ load_taxonomy_data <- function() {
     species_col <- colnames(taxonomy_data)[1]
     taxonomy_data <- taxonomy_data[!grepl('unclassified', taxonomy_data[[species_col]]), ]
     taxonomy_data <- taxonomy_data[!grepl('sp.', taxonomy_data[[species_col]]), ]
+    taxonomy_data <- taxonomy_data[!grepl('\\[',  taxonomy_data[[species_col]]), ]
     
     cat(sprintf("宏基因组数据形状: %d行 x %d列\n", 
                 nrow(taxonomy_data), ncol(taxonomy_data)))
@@ -664,8 +665,8 @@ preprocess_taxonomy_data <- function(df,
     }
     
     if (transform && transform_method == "log") {
-      feature_df <- log10(feature_df + 1)
-      cat("宏基因组数据变换 (log10)\n")
+      feature_df <- log2(feature_df + 1e-6)
+      cat("宏基因组数据变换 (log2)\n")
     }
 
     if (transform && transform_method == "clr") {
@@ -690,14 +691,14 @@ preprocess_taxonomy_data <- function(df,
 # 输入数据格式: 行为代谢物, 列为样本, 第一列为代谢物名称
 preprocess_metabolomics_data <- function(df,
                                          remove_duplicates = TRUE,
-                                         remove_high_missing = TRUE,
-                                         missing_threshold = 0.5,
-                                         min_samples = NULL,
+                                         remove_low_expression = TRUE,
+                                         expression_threshold = 100,
+                                         prevalence_threshold = 0.1,
                                          remove_outliers = FALSE,
                                          outlier_method = "iqr",
                                          outlier_threshold = 3.0,
-                                         relative_expression = FALSE,
-                                         transform = TRUE,
+                                         relative_expression = TRUE,
+                                         transform = FALSE,
                                          transform_method = "log",
                                          scale = FALSE) {
   cat("\n预处理代谢组数据...\n")
@@ -715,19 +716,14 @@ preprocess_metabolomics_data <- function(df,
       df <- df[!dup_rows, ]
     }
   }
-  
-  if (remove_high_missing && length(sample_cols) > 0) {
-    missing_counts <- rowSums(is.na(df[, sample_cols, drop = FALSE]) | df[, sample_cols, drop = FALSE] == "", na.rm = TRUE)
-    missing_ratio <- missing_counts / n_samples
-    
-    if (!is.null(min_samples)) {
-      kept_rows <- (n_samples - missing_counts) >= min_samples
-    } else {
-      kept_rows <- missing_ratio < missing_threshold
-    }
+
+  if (remove_low_expression && length(sample_cols) > 0) {
+    expression_counts <- rowSums(df[, sample_cols, drop = FALSE] > expression_threshold, na.rm = TRUE)
+    prevalence <- expression_counts / n_samples
+    kept_rows <- prevalence >= prevalence_threshold
     df <- df[kept_rows, , drop = FALSE]
-    
-    cat(sprintf("去除高缺失代谢物后保留: %d 个代谢物 (缺失率阈值: %.1f%%)\n", nrow(df), missing_threshold * 100))
+
+    cat(sprintf("过滤低流行度代谢物后保留: %d 个代谢物 (流行度阈值: %.1f%%)\n", nrow(df), prevalence_threshold * 100))
   }
   
   if (remove_outliers && nrow(df) > 0 && length(sample_cols) > 0) {
@@ -777,8 +773,8 @@ preprocess_metabolomics_data <- function(df,
     }
     
     if (transform && transform_method == "log") {
-      feature_df <- log10(feature_df + 1)
-      cat("代谢组数据变换 (log10)\n")
+      feature_df <- log2(feature_df + 1e-6)
+      cat("代谢组数据变换 (log2)\n")
     }
     
     if (scale) {

@@ -27,7 +27,7 @@ theme_microbiome <- function(){
 # 1. 读取数据
 cat("读取合并后的数据...\n")
 merged_data <- fread("dataset/merged_dataset_processed.csv", stringsAsFactors = FALSE, data.table = FALSE)
-output_dir <- file.path("results", "lefse_analysis")
+output_dir <- file.path("results", "R_plots/lefse_analysis")
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 # 2. 准备分组函数
@@ -213,7 +213,9 @@ for (i in 1:length(comparison_groups)) {
     
     # 根据分组筛选各组前20个
     group1_species <- lefse_df[lefse_df$Group == group1, ]
+    group1_species <- group1_species[group1_species$lefse_df < 0.05, ]
     group2_species <- lefse_df[lefse_df$Group == group2, ]
+    group2_species <- group2_species[group2_species$lefse_df < 0.05, ]
     
     # 按LDA得分排序，取前20
     if (nrow(group1_species) > 0) {
@@ -265,7 +267,7 @@ for (i in 1:length(comparison_groups)) {
         theme_microbiome() +
         theme(
           plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
-          axis.text.y = element_text(size = 8),
+          axis.text.y = element_text(size = 8, face = "italic"),
           plot.margin = margin(t = 20, r = 60, b = 20, l = 10)
         ) +
         # 添加分组标签在侧边

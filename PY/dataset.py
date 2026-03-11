@@ -67,6 +67,7 @@ class BioSmokeDataset:
         # 去除重复的物种
         species_col = self.taxonomy_data.columns[0]
         self.taxonomy_data = self.taxonomy_data.drop_duplicates(subset=[species_col], keep='first')
+        sample_cols = self.taxonomy_data.columns[1:]
         
         # 去除低表达物种（在大多数样本中丰度都很低的物种）
         if remove_low_expression:
@@ -113,7 +114,7 @@ class BioSmokeDataset:
             # 相对丰度转换（按列/样本归一化）
             col_sums = self.taxonomy_data[sample_cols].sum(axis=0)
             col_sums = col_sums.replace(0, 1)
-            self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].div(col_sums, axis=1)
+            self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].div(col_sums, axis=1)*100
             print(f"宏基因组数据归一化 (相对丰度转换)")
         
         if transform:
@@ -136,8 +137,9 @@ class BioSmokeDataset:
                                      remove_outliers: bool = False,
                                      outlier_method: str = 'iqr',
                                      outlier_threshold: float = 3.0,
-                                     transform: bool = True,
-                                     transform_method: str = 'log',
+                                     relative_abund: bool = True,
+                                     transform: bool = False,
+                                     transform_method: str = 'log2',
                                      scale: bool = False) -> None:
         """预处理代谢组数据"""
         if self.metabolomics_data is None:
@@ -199,6 +201,13 @@ class BioSmokeDataset:
             
             print(f"去除异常值 ({outlier_method}方法): 处理了 {outlier_count} 个异常值")
         
+        if relative_abund:
+            # 相对丰度转换（按列/样本归一化）
+            col_sums = meta_data[sample_cols].sum(axis=0)
+            col_sums = col_sums.replace(0, 1)
+            meta_data[sample_cols] = meta_data[sample_cols].div(col_sums, axis=1)*100
+            print(f"代谢组数据归一化 (相对丰度转换)")
+        
         if transform:
             sample_cols = meta_data.columns[1:]
             
@@ -209,7 +218,7 @@ class BioSmokeDataset:
                 print(f"代谢组数据变换 (log1p)")
                 
             elif transform_method == 'log2':
-                meta_data[sample_cols] = np.log2(meta_data[sample_cols].clip(lower=1))
+                meta_data[sample_cols] = np.log2(meta_data[sample_cols].clip(lower=1) + 1e-6)
                 print(f"代谢组数据变换 (log2)")
                 
             elif transform_method == 'sqrt':
@@ -271,8 +280,10 @@ class BioSmokeDataset:
 
             # self.taxonomy_data = self.taxonomy_data[~self.taxonomy_data.iloc[:,0].str.contains('CAG', na=False)]
 
-            # self.taxonomy_data = self.taxonomy_data[~self.taxonomy_data.iloc[:,0].str.contains('_sp', na=False)]
-            
+            self.taxonomy_data = self.taxonomy_data[~self.taxonomy_data.iloc[:,0].str.contains('_sp', na=False)]
+
+            self.taxonomy_data = self.taxonomy_data[~self.taxonomy_data.iloc[:,0].str.contains('\\[', na=False)]
+
             # 第一列是Species，其他列是样本
             print(f"宏基因组数据形状: {self.taxonomy_data.shape}")
             # print(f"宏基因组样本列数: {len(self.taxonomy_data.columns) - 1}")

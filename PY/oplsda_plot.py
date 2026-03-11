@@ -560,62 +560,6 @@ def plot_single_volcano(volcano_df: pd.DataFrame, vip_scores: np.ndarray, featur
     
     return ax
 
-def plot_combined_volcano_plots(df: pd.DataFrame, results_dict: dict, output_dir: str = './results/oplsda_plots'):
-    """
-    绘制四组火山图并横向拼接
-    
-    参数:
-        df: 包含特征和分组的数据框
-        results_dict: 包含各组OPLS-DA结果的字典
-        output_dir: 输出目录
-    """
-    comparisons = [
-        ('CRC_poordiff', 'CRC_welldiff'),
-        ('CRC_poordiff', 'CTRL'),
-        ('CRC_welldiff', 'CTRL'),
-    ]
-    
-    fig, axes = plt.subplots(1, 2, figsize=(8, 8))
-    axes = axes.flatten()
-    
-    fig.patch.set_facecolor('#F0F0F0')
-    
-    for idx, (group1, group2) in enumerate(comparisons):
-        key = f'{group1}_vs_{group2}'
-        if key not in results_dict:
-            continue
-        
-        results = results_dict[key]
-        
-        volcano_df = calculate_volcano_data(df, 'met_', group1, group2)
-        
-        if volcano_df is None:
-            continue
-        
-        show_yaxis = (idx == 0)
-        plot_single_volcano(volcano_df, results['vip_scores'], results['feature_names'],
-                           group1, group2, ax=axes[idx], show_yaxis=show_yaxis, show_spines=False)
-    
-    legend_elements = [
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#DC143C', markersize=10, label='Significantly Upregulated'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#FFB6B6', markersize=10, label='Upregulated'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#ADD8E6', markersize=10, label='Downregulated'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#00008B', markersize=10, label='Significantly Downregulated'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#999999', markersize=10, label='Not Significant')
-    ]
-    
-    fig.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, 0.98), 
-               ncol=5, fontsize=11, framealpha=0.9)
-    
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.92)
-    
-    out_png = os.path.join(output_dir, 'volcano_plots_combined.png')
-    plt.savefig(out_png, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"  已保存火山图: {out_png}")
-
 def main():
     # 加载数据
     ds = BioSmokeDataset()
@@ -669,12 +613,6 @@ def main():
         if met_results is not None:
             key = f'{group1}_vs_{group2}'
             results_dict[key] = met_results
-    
-    # 绘制火山图
-    print(f"\n{'='*60}")
-    print("绘制火山图...")
-    print(f"{'='*60}")
-    plot_combined_volcano_plots(merged, results_dict, output_dir)
     
     print(f"\n{'='*60}")
     print("分析完成！")

@@ -8,13 +8,15 @@ import warnings
 warnings.filterwarnings('ignore')
 from dataset import BioSmokeDataset
 from pathlib import Path
-from split_group import prepare_early_late_groups
+from split_group import prepare_crc_diff_groups
 
 def calculate_unified_group_correlations(
     df: pd.DataFrame, 
     top_n_species: int = 10, 
     top_n_metabolites: int = 20,
-    method: str = 'spearman'
+    method: str = 'spearman',
+    fixed_species: Optional[List[str]] = None,
+    fixed_metabolites: Optional[List[str]] = None
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame], List[str], List[str]]:
     """
     Calculate correlations between species and metabolites within each group using common species and metabolites
@@ -24,6 +26,8 @@ def calculate_unified_group_correlations(
         top_n_species: Number of top species to select for visualization
         top_n_metabolites: Number of top metabolites to select for visualization
         method: Correlation calculation method ('spearman' or 'pearson')
+        fixed_species: Optional list of fixed species names (without tax_ prefix) to use
+        fixed_metabolites: Optional list of fixed metabolite names (without met_ prefix) to use
         
     Returns:
         Tuple: (correlations_by_group, pvalues_by_group, common_species, common_metabolites)
@@ -44,7 +48,7 @@ def calculate_unified_group_correlations(
     
     # Get group information
     if 'group' not in df.columns:
-        df = prepare_early_late_groups(df)
+        df = prepare_crc_diff_groups(df)
     
     groups = df['group'].unique()
     print(f"Found {len(groups)} groups: {groups}")
@@ -69,26 +73,58 @@ def calculate_unified_group_correlations(
         group_metabolite_means[group] = metabolite_data.mean(axis=0)
     
     # Step 2: Select common species and metabolites
-    # Calculate average ranking of species across all groups
-    all_species_ranks = pd.DataFrame()
-    for group, means in group_species_means.items():
-        # Rank species by mean values for each group
-        ranked = means.rank(ascending=False, method='first')
-        all_species_ranks[group] = ranked
-    
-    # Calculate average rank
-    avg_species_ranks = all_species_ranks.mean(axis=1)
-    # Select top_n_species species with best average rank
-    common_species = avg_species_ranks.nsmallest(top_n_species).index.tolist()
+    # Use fixed species if provided, otherwise select by ranking
+    if fixed_species:
+        # Match fixed species names with dataset columns (add tax_ prefix)
+        common_species = []
+        missing_species = []
+        for species_name in fixed_species:
+            matched_cols = [col for col in species_cols if species_name.lower() in col.lower()]
+            if matched_cols:
+                common_species.append(matched_cols[0])
+            else:
+                missing_species.append(species_name)
+        
+        if missing_species:
+            raise ValueError(f"Species not found in dataset: {missing_species}")
+        
+        print(f"\nUsing fixed species: {[s.replace('tax_', '') for s in common_species]}")
+    else:
+        # Calculate average ranking of species across all groups
+        all_species_ranks = pd.DataFrame()
+        for group, means in group_species_means.items():
+            ranked = means.rank(ascending=False, method='first')
+            all_species_ranks[group] = ranked
+        
+        avg_species_ranks = all_species_ranks.mean(axis=1)
+        common_species = avg_species_ranks.nsmallest(top_n_species).index.tolist()
     
     # Same method for metabolites
-    all_metabolite_ranks = pd.DataFrame()
-    for group, means in group_metabolite_means.items():
-        ranked = means.rank(ascending=False, method='first')
-        all_metabolite_ranks[group] = ranked
-    
-    avg_metabolite_ranks = all_metabolite_ranks.mean(axis=1)
-    common_metabolites = avg_metabolite_ranks.nsmallest(top_n_metabolites).index.tolist()
+    # Use fixed metabolites if provided, otherwise select by ranking
+    if fixed_metabolites:
+        # Match fixed metabolite names with dataset columns (add met_ prefix)
+        common_metabolites = []
+        missing_metabolites = []
+        for metabolite_name in fixed_metabolites:
+            # Try exact match first, then partial match
+            matched_cols = [col for col in metabolite_cols if metabolite_name.lower() in col.lower()]
+            if matched_cols:
+                common_metabolites.append(matched_cols[0])
+            else:
+                missing_metabolites.append(metabolite_name)
+        
+        if missing_metabolites:
+            raise ValueError(f"Metabolites not found in dataset: {missing_metabolites}")
+        
+        print(f"\nUsing fixed metabolites: {[m.replace('met_', '') for m in common_metabolites]}")
+    else:
+        all_metabolite_ranks = pd.DataFrame()
+        for group, means in group_metabolite_means.items():
+            ranked = means.rank(ascending=False, method='first')
+            all_metabolite_ranks[group] = ranked
+        
+        avg_metabolite_ranks = all_metabolite_ranks.mean(axis=1)
+        common_metabolites = avg_metabolite_ranks.nsmallest(top_n_metabolites).index.tolist()
     
     print(f"\nCommonly selected species (top {top_n_species}): {[s.replace('tax_', '')[:20] for s in common_species]}")
     print(f"Commonly selected metabolites (top {top_n_metabolites}): {[m.replace('met_', '')[:20] for m in common_metabolites]}")
@@ -144,20 +180,33 @@ def calculate_unified_group_correlations(
                         continue
                 
                 try:
+                    # Check for NaN values
+                    species_nan_count = np.isnan(species_values).sum()
+                    metabolite_nan_count = np.isnan(metabolite_values).sum()
+                    
+                    if species_nan_count > 0 or metabolite_nan_count > 0:
+                        raise ValueError(f"NaN values found: species '{species_col}' has {species_nan_count} NaNs, metabolite '{metabolite_col}' has {metabolite_nan_count} NaNs")
+                    
+                    # Check for constant values (no variance)
+                    if np.std(species_values) == 0:
+                        raise ValueError(f"Species '{species_col}' has constant values (no variance)")
+                    if np.std(metabolite_values) == 0:
+                        raise ValueError(f"Metabolite '{metabolite_col}' has constant values (no variance)")
+                    
                     if method == 'spearman':
-                        # Calculate Spearman rank correlation coefficient
                         corr, p_value = stats.spearmanr(species_values, metabolite_values, nan_policy='omit')
                     else:  # pearson
-                        # Calculate Pearson correlation coefficient
                         corr, p_value = stats.pearsonr(species_values, metabolite_values)
+                    
+                    # Check if result is NaN
+                    if np.isnan(corr) or np.isnan(p_value):
+                        raise ValueError(f"Calculation returned NaN: corr={corr}, p_value={p_value}")
                     
                     # Store correlation coefficient and p-value
                     correlation_matrix.iloc[i, j] = corr
                     pvalue_matrix.iloc[i, j] = p_value
                 except Exception as e:
-                    print(f"  Warning: Error calculating correlation between {species_col} and {metabolite_col}: {e}")
-                    correlation_matrix.iloc[i, j] = np.nan
-                    pvalue_matrix.iloc[i, j] = np.nan
+                    raise ValueError(f"Error calculating correlation between '{species_col}' and '{metabolite_col}': {e}")
         
         # Convert to numeric type
         correlation_matrix = correlation_matrix.astype(float)
@@ -178,15 +227,15 @@ def visualize_unified_correlations_heatmap(
     correlations_by_group: Dict[str, pd.DataFrame],
     pvalues_by_group: Dict[str, pd.DataFrame],
     group_order: List[str] = None,
-    figsize: Tuple[int, int] = (22, 18),
+    figsize: Tuple[int, int] = (14, 16),
     cmap: str = 'RdBu_r',
     vmin: float = -1,
     vmax: float = 1,
-    title: str = "Species-Metabolite Correlation Heatmap (Four Groups)",
+    title: str = "Species-Metabolite Correlation Heatmap",
     output_file: str = None
 ):
     """
-    Visualize four-group correlation matrix heatmap using common species and metabolites with asterisk annotations
+    Visualize three-group correlation matrix heatmap using common species and metabolites with asterisk annotations
     
     Args:
         correlations_by_group: Dictionary containing correlation matrices for each group
@@ -203,11 +252,10 @@ def visualize_unified_correlations_heatmap(
         print("No correlation data available")
         return
     
-    # Determine group order - 2x2 grid layout
+    # Determine group order - 1x3 layout for CTRL, CRC_welldiff, CRC_poordiff
     if group_order is None:
-        # Order for 2x2 grid: top-left, top-right, bottom-left, bottom-right
-        group_order = ['CRC_late_smoking', 'CRC_early_smoking', 
-                      'CRC_late_nonsmoking', 'CRC_early_nonsmoking']
+        # Order for 1x3 layout: CTRL, CRC_welldiff (中-高分化), CRC_poordiff (低分化)
+        group_order = ['CTRL', 'CRC_welldiff', 'CRC_poordiff']
     
     # Ensure all groups have matrices with same dimensions
     first_group = group_order[0]
@@ -225,18 +273,15 @@ def visualize_unified_correlations_heatmap(
     # Create figure with tighter layout
     fig = plt.figure(figsize=figsize)
     
-    # Create 2x2 grid of subplots with reduced spacing
-    gs = plt.GridSpec(2, 2, figure=fig, wspace=0.02, hspace=0.04,
-                      left=0.12, right=0.88, bottom=0.12, top=0.88)
+    # Create 3x1 grid of subplots with reduced spacing (vertical layout)
+    gs = plt.GridSpec(3, 1, figure=fig, wspace=0.02, hspace=0.08,
+                      left=0.18, right=0.78, bottom=0.08, top=0.92)
     
     # Create axes for each subplot
     axes = []
-    for i in range(2):
-        row_axes = []
-        for j in range(2):
-            ax = fig.add_subplot(gs[i, j])
-            row_axes.append(ax)
-        axes.append(row_axes)
+    for i in range(3):
+        ax = fig.add_subplot(gs[i, 0])
+        axes.append(ax)
     axes = np.array(axes)
     
     # Define asterisk annotation function
@@ -253,21 +298,19 @@ def visualize_unified_correlations_heatmap(
     # Create list of metabolite names for x-axis
     metabolite_names = correlations_by_group[first_group].columns.tolist()
     species_names = correlations_by_group[first_group].index.tolist()
+    species_names = [s.replace('tax_s__', '')[:25] for s in species_names]
     
     # Define colors for labels
     label_colors = {
-        'SMOKING': '#FFCCCC',  # Light red
-        'NON-SMOKING': '#CCE5FF',  # Light blue
-        'LATE STAGE': '#FFE5CC',  # Light orange
-        'EARLY STAGE': '#E5FFCC'  # Light green
+        'CTRL': '#2E86AB',  # Green
+        'CRC_welldiff': '#A23B72',  # Yellow
+        'CRC_poordiff': '#F18F01'   # Red
     }
     
     # Plot heatmap for each group
     for idx, group_name in enumerate(group_order):
-        row = idx // 2
-        col = idx % 2
-        
-        ax = axes[row, col]
+        row = idx
+        ax = axes[row]
         corr_matrix = correlations_by_group[group_name]
         pvalue_matrix = pvalues_by_group[group_name]
         
@@ -317,102 +360,79 @@ def visualize_unified_correlations_heatmap(
                            color=color, fontsize=6, fontweight='bold')
     
     # Add shared colorbar - 调整位置
-    cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+    cbar_ax = fig.add_axes([0.82, 0.25, 0.015, 0.5])  # [left, bottom, width, height]
     cbar = fig.colorbar(im, cax=cbar_ax)
     cbar.set_label('Correlation Coefficient', rotation=270, labelpad=15, fontsize=11)
     
     # Add overall title
-    fig.suptitle(title, fontsize=16, fontweight='bold', y=0.95)
-    
-    # ================== 添加顶部横向标签 ==================
-    # 获取子图的边界框
-    ax1_bbox = axes[0, 0].get_position()
-    ax2_bbox = axes[0, 1].get_position()
-    ax3_bbox = axes[1, 0].get_position()
-    ax4_bbox = axes[1, 1].get_position()
-    
-    # 左侧列 - LATE STAGE 标签
-    late_x_center = ax1_bbox.x0 + ax1_bbox.width/2
-    fig.text(late_x_center, ax1_bbox.y1 + 0.015, 'CRC LATE STAGE', 
-             ha='center', va='bottom', fontsize=12, fontweight='bold')
-    
-    # 添加背景色块
-    rect_late = plt.Rectangle(
-        (ax1_bbox.x0, ax1_bbox.y1 + 0.015), ax1_bbox.width, 0.03,
-        facecolor=label_colors['LATE STAGE'], edgecolor='black', linewidth=0,
-        transform=fig.transFigure, clip_on=False, zorder=0
-    )
-    fig.add_artist(rect_late)
-    
-    # 右侧列 - EARLY STAGE 标签
-    early_x_center = ax2_bbox.x0 + ax2_bbox.width/2
-    fig.text(early_x_center, ax2_bbox.y1 + 0.015, 'CRC EARLY STAGE', 
-             ha='center', va='bottom', fontsize=12, fontweight='bold')
-    
-    # 添加背景色块
-    rect_early = plt.Rectangle(
-        (ax2_bbox.x0, ax2_bbox.y1 + 0.015), ax2_bbox.width, 0.03,
-        facecolor=label_colors['EARLY STAGE'], edgecolor='black', linewidth=0,
-        transform=fig.transFigure, clip_on=False, zorder=0
-    )
-    fig.add_artist(rect_early)
+    fig.suptitle(title, fontsize=14, fontweight='bold', y=0.96)
     
     # ================== 添加右侧纵向标签 ==================
-    # 顶部行 - SMOKING 标签
-    smoking_y_center = (ax1_bbox.y0 + ax1_bbox.height/2 + ax2_bbox.y0 + ax2_bbox.height/2)/2
-    fig.text(ax1_bbox.x0 - 0.015, smoking_y_center, 'SMOKING', 
-             ha='center', va='center', rotation='vertical', fontsize=12, fontweight='bold')
+    # 获取子图的边界框
+    ax0_bbox = axes[0].get_position()
+    ax1_bbox = axes[1].get_position()
+    ax2_bbox = axes[2].get_position()
+    
+    # CTRL 标签 - 右侧竖向
+    ctrl_y_center = (ax0_bbox.y0 + ax0_bbox.y1) / 2
+    fig.text(ax2_bbox.x1 + 0.01, ctrl_y_center, 'CTRL', 
+             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold')
     
     # 添加背景色块
-    rect_smoking = plt.Rectangle(
-        (ax1_bbox.x0 - 0.025, ax1_bbox.y0), 0.015, ax1_bbox.height,
-        facecolor=label_colors['SMOKING'], edgecolor='black', linewidth=0,
+    rect_ctrl = plt.Rectangle(
+        (ax2_bbox.x1 + 0.005, ax0_bbox.y0), 0.015, ax0_bbox.height,
+        facecolor=label_colors['CTRL'], edgecolor='black', linewidth=0,
         transform=fig.transFigure, clip_on=False, zorder=0
     )
-    fig.add_artist(rect_smoking)
+    fig.add_artist(rect_ctrl)
     
-    # 底部行 - NON-SMOKING 标签
-    nonsmoking_y_center = (ax3_bbox.y0 + ax3_bbox.height/2 + ax4_bbox.y0 + ax4_bbox.height/2)/2
-    fig.text(ax3_bbox.x0 - 0.015, nonsmoking_y_center, 'NON-SMOKING', 
-             ha='center', va='center', rotation='vertical', fontsize=12, fontweight='bold')
+    # CRC_welldiff (中-高分化) 标签 - 右侧竖向
+    welldiff_y_center = (ax1_bbox.y0 + ax1_bbox.y1) / 2
+    fig.text(ax2_bbox.x1 + 0.01, welldiff_y_center, 'CRC WELLDIFF', 
+             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold')
     
     # 添加背景色块
-    rect_nonsmoking = plt.Rectangle(
-        (ax3_bbox.x0 - 0.025, ax3_bbox.y0), 0.015, ax3_bbox.height,
-        facecolor=label_colors['NON-SMOKING'], edgecolor='black', linewidth=0,
+    rect_welldiff = plt.Rectangle(
+        (ax2_bbox.x1 + 0.005, ax1_bbox.y0), 0.015, ax1_bbox.height,
+        facecolor=label_colors['CRC_welldiff'], edgecolor='black', linewidth=0,
         transform=fig.transFigure, clip_on=False, zorder=0
     )
-    fig.add_artist(rect_nonsmoking)
+    fig.add_artist(rect_welldiff)
+    
+    # CRC_poordiff (低分化) 标签 - 右侧竖向
+    poordiff_y_center = (ax2_bbox.y0 + ax2_bbox.y1) / 2
+    fig.text(ax2_bbox.x1 + 0.01, poordiff_y_center, 'CRC POORDIFF', 
+             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold')
+    
+    # 添加背景色块
+    rect_poordiff = plt.Rectangle(
+        (ax2_bbox.x1 + 0.005, ax2_bbox.y0), 0.015, ax2_bbox.height,
+        facecolor=label_colors['CRC_poordiff'], edgecolor='black', linewidth=0,
+        transform=fig.transFigure, clip_on=False, zorder=0
+    )
+    fig.add_artist(rect_poordiff)
     
     # ================== 添加左侧纵向坐标轴标签（物种名称）==================
-    # 在最左侧的热图（左侧列）显示y轴标签
+    # 在最左侧的热图显示y轴标签（顶部热图）
     for i, species_name in enumerate(species_names):
-        # 将物种名称显示在左侧中间位置
-        y_pos = ax1_bbox.y0 + (ax1_bbox.height * (i + 0.4) / n_species)
-        fig.text(ax1_bbox.x0 - 0.03, y_pos, species_name, 
-                 ha='right', va='center', fontsize=8, rotation=0)
-        y_pos = ax3_bbox.y0 + (ax3_bbox.height * (i + 0.4) / n_species)
-        fig.text(ax3_bbox.x0 - 0.03, y_pos, species_name, 
-                 ha='right', va='center', fontsize=8, rotation=0)
+        y_pos = ax0_bbox.y0 + (ax0_bbox.height * (i + 0.4) / n_species)
+        fig.text(ax0_bbox.x0 - 0.01, y_pos, species_name, 
+                 ha='right', va='center', fontsize=9, rotation=0)
     
     # ================== 添加底部横向坐标轴标签（代谢物名称）==================
-    # 在底部行的热图显示x轴标签
+    # 在底部热图显示x轴标签
     for j, metabolite_name in enumerate(metabolite_names):
-        # 将代谢物名称显示在底部中间位置
-        x_pos = ax3_bbox.x0 + (ax3_bbox.width * (j + 0.5) / n_metabolites)
-        fig.text(x_pos, ax3_bbox.y0 - 0.01, metabolite_name, 
-                 ha='center', va='top', fontsize=8, rotation=90)
-        x_pos = ax4_bbox.x0 + (ax4_bbox.width * (j + 0.5) / n_metabolites)
-        fig.text(x_pos, ax4_bbox.y0 - 0.01, metabolite_name, 
-                 ha='center', va='top', fontsize=8, rotation=90)
+        x_pos = ax2_bbox.x0 + (ax2_bbox.width * (j + 0.5) / n_metabolites)
+        fig.text(x_pos, ax2_bbox.y0 - 0.01, metabolite_name, 
+                 ha='center', va='top', fontsize=9, rotation=90)
     
     # ================== 添加图例说明 ==================
     legend_text = "Significance levels: *p < 0.05, **p < 0.01, ***p < 0.001"
-    fig.text(0.5, -0.12, legend_text, ha='center', fontsize=10, style='italic')
+    fig.text(0.5, 0.03, legend_text, ha='center', fontsize=10, style='italic', transform=fig.transFigure)
     
     if output_file:
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
-        print(f"Four-group comparison heatmap saved to: {output_file}")
+        print(f"Three-group comparison heatmap saved to: {output_file}")
     
     # plt.show()
     
@@ -442,7 +462,9 @@ def analyze_unified_group_correlations(
     top_n_species: int = 10,
     top_n_metabolites: int = 20,
     method: str = 'spearman',
-    output_prefix: str = 'unified_group_correlations'
+    output_prefix: str = 'unified_group_correlations',
+    fixed_species: Optional[List[str]] = None,
+    fixed_metabolites: Optional[List[str]] = None
 ):
     """
     Complete analysis of group correlations with visualization (using common species and metabolites)
@@ -453,6 +475,8 @@ def analyze_unified_group_correlations(
         top_n_metabolites: Number of top metabolites to select
         method: Correlation calculation method
         output_prefix: Output file prefix
+        fixed_species: Optional list of fixed species names to use
+        fixed_metabolites: Optional list of fixed metabolite names to use
     """
     print("="*80)
     print("Starting unified group correlation analysis (using common species and metabolites)")
@@ -463,20 +487,22 @@ def analyze_unified_group_correlations(
         df, 
         top_n_species=top_n_species, 
         top_n_metabolites=top_n_metabolites,
-        method=method
+        method=method,
+        fixed_species=fixed_species,
+        fixed_metabolites=fixed_metabolites
     )
     
     if not correlations:
         print("No valid correlation matrices calculated")
         return None, None, None, None
     
-    # 2. Visualize four-group comparison heatmap (with asterisk annotations)
+    # 2. Visualize three-group comparison heatmap (with asterisk annotations)
     print("\n" + "="*80)
-    print("Generating four-group comparison heatmap (with asterisk annotations)")
+    print("Generating three-group comparison heatmap (with asterisk annotations)")
     print("="*80)
     
-    # Define group order: late non-smoking, early non-smoking, late smoking, early smoking
-    group_order = ['CRC_late_nonsmoking', 'CRC_early_nonsmoking', 'CRC_late_smoking', 'CRC_early_smoking']
+    # Define group order: CTRL, CRC_welldiff, CRC_poordiff
+    group_order = ['CTRL', 'CRC_welldiff', 'CRC_poordiff']
     
     # Only keep existing groups
     group_order = [g for g in group_order if g in correlations]
@@ -485,10 +511,10 @@ def analyze_unified_group_correlations(
         correlations,
         pvalues,
         group_order=group_order,
-        figsize=(18, 9),
+        figsize=(14, 16),
         cmap='RdBu_r',
-        title=f"{method.capitalize()} Correlation - Four Group Comparison",
-        output_file=f"{output_prefix}_four_groups_heatmap.png"
+        title=f"{method.capitalize()} Correlation - CRC Differentiation Comparison",
+        output_file=f"{output_prefix}_three_groups_heatmap.png"
     )
     
     # 3. Output statistical information
@@ -613,16 +639,56 @@ def analyze_unified_group_correlations(
 # Usage example
 if __name__ == "__main__":
     ds = BioSmokeDataset()
+    ds.preprocess_taxonomy_data(remove_low_expression = False)
+    ds.preprocess_metabolomics_data(relative_abund=False)
     merged = ds.intersection_to_dataframe()
 
     out_dir = Path('results/heatmap_plots')
     out_dir.mkdir(parents=True, exist_ok=True)
     
     # Execute unified correlation analysis
+    fixed_species_list = [
+        'Peptostreptococcus_stomatis',
+        'Porphyromonas_gingivalis',
+        'Prevotella_intermedia',
+        'Fusobacterium_periodonticum',
+        'Campylobacter_rectus',
+        'Faecalibacterium_prausnitzii',
+        'Roseburia_intestinalis',
+        'Eubacterium_rectale',
+        'Coprococcus_comes',
+        'Ruminococcus_lactaris'
+    ]
+    
+    fixed_metabolites_list = [
+        'SQDG 26:2; SQDG(13:1/13:1)',
+        'Cytosine',
+        'Perfluorooctanesulfonic acid',
+        'Methyl dihydrojasmonate',
+        'Pyrogallol-2-O-sulphate',
+        "5'-(3',4'-Dihydroxyphenyl)-gamma-valerolactone sulfate",
+        '2-Hydroxy-4,7-dimethoxy-2H-1,4-benzoxazin-3(4H)-one',
+        'trans-3,5-Dimethoxy-4-hydroxycinnamaldehyde',
+        '(R)-3-Hydroxy-5-phenylpentanoic acid',
+        'N-Methyl-D-glucamine',
+        'Chenodeoxycholic acid sulfate',
+        'Creatinine',
+        'Lucidenic acid F',
+        'Demissidine',
+        'Alpha-Hydroxyisobutyric acid',
+        'Pyrocatechol',
+        'Gentisic acid',
+        'D-Galacturonic acid',
+        '1,3-Dimethyluric acid',
+        '4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate'
+    ]
+    
     correlations, pvalues, common_species, common_metabolites = analyze_unified_group_correlations(
         merged,
         top_n_species=10,      # Select top 10 species
         top_n_metabolites=20,  # Select top 20 metabolites
         method='spearman',     # Use Spearman correlation
-        output_prefix=str(out_dir / 'unified_group_correlations')
+        output_prefix=str(out_dir / 'unified_group_correlations'),
+        fixed_species=fixed_species_list,
+        fixed_metabolites=fixed_metabolites_list
     )

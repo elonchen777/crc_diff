@@ -5,6 +5,7 @@ library(tidyr)
 library(RColorBrewer)
 library(data.table)
 library(vegan)
+library(ggrepel)
 
 theme_microbiome <- function(){ 
   theme_bw(base_size = 14) + 
@@ -64,6 +65,8 @@ rownames(species_matrix) <- taxonomy_data$SAMPLE_ID
 
 species_by_sample <- t(species_matrix)
 species_names <- rownames(species_by_sample)
+species_names <- sub("^tax_", "", species_names)
+rownames(species_by_sample) <- species_names
 
 group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#A23B72", 
                   "CRC_poor_diff" = "#F18F01")
@@ -195,8 +198,11 @@ for (i in 1:length(comparison_groups)) {
   if (nrow(significant_species) > 0) {
     top_species <- head(significant_species, 10)
     volcano_plot <- volcano_plot +
-      geom_text(data = volcano_data[volcano_data$species %in% top_species$species, ],
-                aes(label = species), size = 3, vjust = -0.5, hjust = 0.5, color = "black")
+      geom_text_repel(data = volcano_data[volcano_data$species %in% top_species$species, ],
+                      aes(label = species), size = 3, color = "black",
+                      segment.color = "gray50", segment.alpha = 0.6,
+                      point.padding = 0.3, box.padding = 0.5,
+                      max.overlaps = 20)
   }
   
   ggsave(file.path(output_dir, paste0("Volcano_species_", comparison_name, ".png")), 
@@ -218,34 +224,28 @@ write.csv(data.frame(species_name = species_names),
           file.path(output_dir, "species_names.csv"), row.names = FALSE)
 
 cat("\n========== 开始代谢物火山图分析 ==========\n")
+metabolite_cols <- grep("^met_", colnames(merged_data), value = TRUE)
+cat(sprintf("找到 %d 个代谢物特征\n", length(metabolite_cols)))
 
-cat("读取代谢物数据...\n")
-metabolome_data <- fread("dataset/metabolome_data.csv", stringsAsFactors = FALSE, data.table = FALSE)
+metabolite_data <- grouped_data[, c("SAMPLE_ID", "group", "age", "gender_label", metabolite_cols)]
 
-metabolite_names <- metabolome_data[, 1]
-metabolome_matrix <- as.matrix(metabolome_data[, -1])
-rownames(metabolome_matrix) <- metabolite_names
+met_matrix <- as.matrix(metabolite_data[, metabolite_cols])
+rownames(met_matrix) <- metabolite_data$SAMPLE_ID
 
-cat(sprintf("代谢物数据: %d 个代谢物, %d 个样本\n", nrow(metabolome_matrix), ncol(metabolome_matrix)))
+met_by_sample <- t(met_matrix)
+met_names <- rownames(met_by_sample)
+met_names <- sub("^met_", "", met_names)
+rownames(met_by_sample) <- met_names
 
-cat("处理代谢物数据...\n")
-metabolome_by_sample <- t(metabolome_matrix)
-metabolome_by_sample <- metabolome_by_sample[, colSums(metabolome_by_sample, na.rm = TRUE) > 0, drop = FALSE]
-cat(sprintf("移除全零代谢物后: %d个代谢物\n", ncol(metabolome_by_sample)))
+cat(sprintf("代谢物数据: %d 个代谢物, %d 个样本\n", nrow(met_by_sample), ncol(met_by_sample)))
 
-mean_metab_abundance <- colMeans(metabolome_by_sample, na.rm = TRUE)
-metab_abundance_threshold <- 100
-metabolome_by_sample <- metabolome_by_sample[, mean_metab_abundance >= metab_abundance_threshold, drop = FALSE]
-cat(sprintf("过滤掉平均丰度 < %.2f 的代谢物后: %d个代谢物\n", metab_abundance_threshold, ncol(metabolome_by_sample)))
-
-final_metabolite_names <- colnames(metabolome_by_sample)
-
-metabolome_df <- as.data.frame(metabolome_by_sample)
-metabolome_df$SAMPLE_ID <- rownames(metabolome_by_sample)
+metab_abundance_data <- as.data.frame(t(met_by_sample))
+colnames(metab_abundance_data) <- met_names
+metab_abundance_data$SAMPLE_ID <- rownames(metab_abundance_data)
 
 metab_analysis_data <- merge(
-  taxonomy_data[, c("SAMPLE_ID", "group", "age", "gender_label")],
-  metabolome_df,
+  grouped_data[, c("SAMPLE_ID", "group", "age", "gender_label")],
+  metab_abundance_data,
   by = "SAMPLE_ID"
 )
 
@@ -270,7 +270,7 @@ for (i in 1:length(comparison_groups)) {
   
   current_metab_data$group_factor <- factor(current_metab_data$group, levels = c(group1, group2))
   
-  metab_cols <- final_metabolite_names
+  metab_cols <- met_names
   metab_matrix <- as.matrix(current_metab_data[, metab_cols])
   rownames(metab_matrix) <- current_metab_data$SAMPLE_ID
   
@@ -318,7 +318,7 @@ for (i in 1:length(comparison_groups)) {
     
     if (sum(y > 0, na.rm = TRUE) < 3) next
     
-    fit <- try(lm(log2(y + 1) ~ group_factor + age + gender, data = current_metab_data), silent = TRUE)
+    fit <- try(lm(log2(y + 1e-5) ~ group_factor + age + gender, data = current_metab_data), silent = TRUE)
     
     if (!inherits(fit, "try-error")) {
       coef_sum <- summary(fit)$coefficients
@@ -340,7 +340,7 @@ for (i in 1:length(comparison_groups)) {
   cat("生成代谢物火山图...\n")
   
   metab_volcano_data <- metab_results
-  metab_volcano_data$log10p <- -log10(metab_volcano_data$pvalue)
+  metab_volcano_data$log10p <- -log10(metab_volcano_data$p_adj)
   metab_volcano_data$significance <- "Not Significant"
   metab_volcano_data$significance[metab_volcano_data$p_adj < 0.05 & metab_volcano_data$log2FC > 0] <- "Up"
   metab_volcano_data$significance[metab_volcano_data$p_adj < 0.05 & metab_volcano_data$log2FC < 0] <- "Down"
@@ -357,7 +357,7 @@ for (i in 1:length(comparison_groups)) {
                            sum(metab_volcano_data$significance == "Up"),
                            sum(metab_volcano_data$significance == "Down")),
          x = "log2 Fold Change",
-         y = "-log10(p-value)",
+         y = "-log10(q-value)",
          color = "Significance") +
     theme_microbiome() +
     theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
@@ -367,8 +367,11 @@ for (i in 1:length(comparison_groups)) {
   if (nrow(significant_metabolites) > 0) {
     top_metabolites <- head(significant_metabolites, 10)
     metab_volcano_plot <- metab_volcano_plot +
-      geom_text(data = metab_volcano_data[metab_volcano_data$metabolite %in% top_metabolites$metabolite, ],
-                aes(label = metabolite), size = 3, vjust = -0.5, hjust = 0.5, color = "black")
+      geom_text_repel(data = metab_volcano_data[metab_volcano_data$metabolite %in% top_metabolites$metabolite, ],
+                      aes(label = metabolite), size = 3, color = "black",
+                      segment.color = "gray50", segment.alpha = 0.6,
+                      point.padding = 0.3, box.padding = 0.5,
+                      max.overlaps = 20)
   }
   
   ggsave(file.path(output_dir, paste0("Volcano_metabolites_", comparison_name, ".png")), 
@@ -389,7 +392,7 @@ for (i in 1:length(comparison_groups)) {
             file.path(output_dir, paste0("all_metabolites_results_", comparison_name, ".csv")))
 }
 
-write.csv(data.frame(metabolite_name = final_metabolite_names), 
+write.csv(data.frame(metabolite_name = met_names), 
           file.path(output_dir, "metabolite_names.csv"), row.names = FALSE)
 
 cat("\n========== 火山图分析完成 ==========\n")

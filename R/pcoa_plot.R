@@ -191,33 +191,26 @@ write.csv(data.frame(species_name = species_names),
 
 cat("\n========== 开始代谢物PCoA分析 ==========\n")
 
-cat("读取代谢物数据...\n")
-metabolome_data <- fread("dataset/metabolome_data.csv", stringsAsFactors = FALSE, data.table = FALSE)
+metabolite_cols <- grep("^met_", colnames(merged_data), value = TRUE)
+cat(sprintf("找到 %d 个代谢物特征\n", length(metabolite_cols)))
 
-metabolite_names <- metabolome_data[, 1]
-metabolome_matrix <- as.matrix(metabolome_data[, -1])
-rownames(metabolome_matrix) <- metabolite_names
+metabolite_data <- grouped_data[, c("SAMPLE_ID", "group", "age", "gender_label", metabolite_cols)]
 
-cat(sprintf("代谢物数据: %d 个代谢物, %d 个样本\n", nrow(metabolome_matrix), ncol(metabolome_matrix)))
+met_matrix <- as.matrix(metabolite_data[, metabolite_cols])
+rownames(met_matrix) <- metabolite_data$SAMPLE_ID
 
-cat("处理代谢物数据...\n")
-metabolome_by_sample <- t(metabolome_matrix)
-metabolome_by_sample <- metabolome_by_sample[, colSums(metabolome_by_sample, na.rm = TRUE) > 0, drop = FALSE]
-cat(sprintf("移除全零代谢物后: %d个代谢物\n", ncol(metabolome_by_sample)))
+met_by_sample <- t(met_matrix)
+met_names <- rownames(met_by_sample)
 
-mean_metab_abundance <- colMeans(metabolome_by_sample, na.rm = TRUE)
-metab_abundance_threshold <- 100
-metabolome_by_sample <- metabolome_by_sample[, mean_metab_abundance >= metab_abundance_threshold, drop = FALSE]
-cat(sprintf("过滤掉平均丰度 < %.2f 的代谢物后: %d个代谢物\n", metab_abundance_threshold, ncol(metabolome_by_sample)))
+cat(sprintf("代谢物数据: %d 个代谢物, %d 个样本\n", nrow(met_by_sample), ncol(met_by_sample)))
 
-final_metabolite_names <- colnames(metabolome_by_sample)
-
-metabolome_df <- as.data.frame(metabolome_by_sample)
-metabolome_df$SAMPLE_ID <- rownames(metabolome_by_sample)
+metab_abundance_data <- as.data.frame(t(met_by_sample))
+colnames(metab_abundance_data) <- met_names
+metab_abundance_data$SAMPLE_ID <- rownames(metab_abundance_data)
 
 metab_analysis_data <- merge(
-  taxonomy_data[, c("SAMPLE_ID", "group", "age", "gender_label")],
-  metabolome_df,
+  grouped_data[, c("SAMPLE_ID", "group", "age", "gender_label")],
+  metab_abundance_data,
   by = "SAMPLE_ID"
 )
 
@@ -242,7 +235,7 @@ for (i in 1:length(comparison_groups)) {
   
   current_metab_data$group_factor <- factor(current_metab_data$group, levels = c(group1, group2))
   
-  metab_cols <- final_metabolite_names
+  metab_cols <- met_names
   metab_matrix <- as.matrix(current_metab_data[, metab_cols])
   rownames(metab_matrix) <- current_metab_data$SAMPLE_ID
   
@@ -333,7 +326,7 @@ for (i in 1:length(comparison_groups)) {
   cat(sprintf("代谢物PCoA图已保存: PCoA_metabolites_%s.png\n", comparison_name))
 }
 
-write.csv(data.frame(metabolite_name = final_metabolite_names), 
+write.csv(data.frame(metabolite_name = met_names), 
           file.path(output_dir, "metabolite_names.csv"), row.names = FALSE)
 
 cat("\n========== PCoA分析完成 ==========\n")
