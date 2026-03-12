@@ -88,7 +88,7 @@ def calculate_unified_group_correlations(
         if missing_species:
             raise ValueError(f"Species not found in dataset: {missing_species}")
         
-        print(f"\nUsing fixed species: {[s.replace('tax_', '') for s in common_species]}")
+        print(f"\nUsing fixed species: {[s.replace('tax_s__', '') for s in common_species]}")
     else:
         # Calculate average ranking of species across all groups
         all_species_ranks = pd.DataFrame()
@@ -126,7 +126,7 @@ def calculate_unified_group_correlations(
         avg_metabolite_ranks = all_metabolite_ranks.mean(axis=1)
         common_metabolites = avg_metabolite_ranks.nsmallest(top_n_metabolites).index.tolist()
     
-    print(f"\nCommonly selected species (top {top_n_species}): {[s.replace('tax_', '')[:20] for s in common_species]}")
+    print(f"\nCommonly selected species (top {top_n_species}): {[s.replace('tax_s__', '')[:20] for s in common_species]}")
     print(f"Commonly selected metabolites (top {top_n_metabolites}): {[m.replace('met_', '')[:20] for m in common_metabolites]}")
     
     # Step 3: Calculate correlation matrix and p-value matrix for each group
@@ -147,12 +147,12 @@ def calculate_unified_group_correlations(
         
         # Create correlation matrix and p-value matrix
         correlation_matrix = pd.DataFrame(
-            index=[s.replace('tax_', '')[:30] for s in common_species],
+            index=[s.replace('tax_s__', '')[:30] for s in common_species],
             columns=[m.replace('met_', '')[:30] for m in common_metabolites]
         )
         
         pvalue_matrix = pd.DataFrame(
-            index=[s.replace('tax_', '')[:30] for s in common_species],
+            index=[s.replace('tax_s__', '')[:30] for s in common_species],
             columns=[m.replace('met_', '')[:30] for m in common_metabolites]
         )
         
@@ -274,7 +274,7 @@ def visualize_unified_correlations_heatmap(
     fig = plt.figure(figsize=figsize)
     
     # Create 3x1 grid of subplots with reduced spacing (vertical layout)
-    gs = plt.GridSpec(3, 1, figure=fig, wspace=0.02, hspace=0.08,
+    gs = plt.GridSpec(3, 1, figure=fig, wspace=0.02, hspace=0.02,
                       left=0.18, right=0.78, bottom=0.08, top=0.92)
     
     # Create axes for each subplot
@@ -360,7 +360,7 @@ def visualize_unified_correlations_heatmap(
                            color=color, fontsize=6, fontweight='bold')
     
     # Add shared colorbar - 调整位置
-    cbar_ax = fig.add_axes([0.82, 0.25, 0.015, 0.5])  # [left, bottom, width, height]
+    cbar_ax = fig.add_axes([0.88, 0.25, 0.015, 0.5])  # [left, bottom, width, height]
     cbar = fig.colorbar(im, cax=cbar_ax)
     cbar.set_label('Correlation Coefficient', rotation=270, labelpad=15, fontsize=11)
     
@@ -376,11 +376,11 @@ def visualize_unified_correlations_heatmap(
     # CTRL 标签 - 右侧竖向
     ctrl_y_center = (ax0_bbox.y0 + ax0_bbox.y1) / 2
     fig.text(ax2_bbox.x1 + 0.01, ctrl_y_center, 'CTRL', 
-             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold')
+             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold',color='white')
     
     # 添加背景色块
     rect_ctrl = plt.Rectangle(
-        (ax2_bbox.x1 + 0.005, ax0_bbox.y0), 0.015, ax0_bbox.height,
+        (ax2_bbox.x1 + 0.005, ax0_bbox.y0), 0.02, ax0_bbox.height,
         facecolor=label_colors['CTRL'], edgecolor='black', linewidth=0,
         transform=fig.transFigure, clip_on=False, zorder=0
     )
@@ -389,11 +389,11 @@ def visualize_unified_correlations_heatmap(
     # CRC_welldiff (中-高分化) 标签 - 右侧竖向
     welldiff_y_center = (ax1_bbox.y0 + ax1_bbox.y1) / 2
     fig.text(ax2_bbox.x1 + 0.01, welldiff_y_center, 'CRC WELLDIFF', 
-             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold')
+             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold',color='white')
     
     # 添加背景色块
     rect_welldiff = plt.Rectangle(
-        (ax2_bbox.x1 + 0.005, ax1_bbox.y0), 0.015, ax1_bbox.height,
+        (ax2_bbox.x1 + 0.005, ax1_bbox.y0), 0.02, ax1_bbox.height,
         facecolor=label_colors['CRC_welldiff'], edgecolor='black', linewidth=0,
         transform=fig.transFigure, clip_on=False, zorder=0
     )
@@ -402,11 +402,11 @@ def visualize_unified_correlations_heatmap(
     # CRC_poordiff (低分化) 标签 - 右侧竖向
     poordiff_y_center = (ax2_bbox.y0 + ax2_bbox.y1) / 2
     fig.text(ax2_bbox.x1 + 0.01, poordiff_y_center, 'CRC POORDIFF', 
-             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold')
+             ha='left', va='center', rotation='vertical', fontsize=11, fontweight='bold',color='white')
     
     # 添加背景色块
     rect_poordiff = plt.Rectangle(
-        (ax2_bbox.x1 + 0.005, ax2_bbox.y0), 0.015, ax2_bbox.height,
+        (ax2_bbox.x1 + 0.005, ax2_bbox.y0), 0.02, ax2_bbox.height,
         facecolor=label_colors['CRC_poordiff'], edgecolor='black', linewidth=0,
         transform=fig.transFigure, clip_on=False, zorder=0
     )
@@ -417,7 +417,15 @@ def visualize_unified_correlations_heatmap(
     for i, species_name in enumerate(species_names):
         y_pos = ax0_bbox.y0 + (ax0_bbox.height * (i + 0.4) / n_species)
         fig.text(ax0_bbox.x0 - 0.01, y_pos, species_name, 
-                 ha='right', va='center', fontsize=9, rotation=0)
+                 ha='right', va='center', fontsize=9, rotation=0,style='italic')
+
+        y_pos = ax1_bbox.y0 + (ax1_bbox.height * (i + 0.4) / n_species)
+        fig.text(ax1_bbox.x0 - 0.01, y_pos, species_name, 
+                 ha='right', va='center', fontsize=9, rotation=0,style='italic')
+        
+        y_pos = ax2_bbox.y0 + (ax2_bbox.height * (i + 0.4) / n_species)
+        fig.text(ax2_bbox.x0 - 0.01, y_pos, species_name, 
+                 ha='right', va='center', fontsize=9, rotation=0,style='italic')
     
     # ================== 添加底部横向坐标轴标签（代谢物名称）==================
     # 在底部热图显示x轴标签
@@ -427,8 +435,8 @@ def visualize_unified_correlations_heatmap(
                  ha='center', va='top', fontsize=9, rotation=90)
     
     # ================== 添加图例说明 ==================
-    legend_text = "Significance levels: *p < 0.05, **p < 0.01, ***p < 0.001"
-    fig.text(0.5, 0.03, legend_text, ha='center', fontsize=10, style='italic', transform=fig.transFigure)
+    legend_text = "Significance levels: \n *p < 0.05 \n **p < 0.01 \n ***p < 0.001"
+    fig.text(0.9, 0.1, legend_text, ha='center', fontsize=10, style='italic', transform=fig.transFigure)
     
     if output_file:
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -614,7 +622,7 @@ def analyze_unified_group_correlations(
     # Save species list
     species_df = pd.DataFrame({
         'original_name': common_species,
-        'display_name': [s.replace('tax_', '')[:30] for s in common_species]
+        'display_name': [s.replace('tax_s__', '')[:30] for s in common_species]
     })
     species_filename = f"{output_prefix}_common_species.csv"
     species_df.to_csv(species_filename, index=False)
@@ -639,8 +647,8 @@ def analyze_unified_group_correlations(
 # Usage example
 if __name__ == "__main__":
     ds = BioSmokeDataset()
-    ds.preprocess_taxonomy_data(remove_low_expression = False)
-    ds.preprocess_metabolomics_data(relative_abund=False)
+    ds.preprocess_taxonomy_data(remove_low_expression = False, transform=True)
+    ds.preprocess_metabolomics_data(relative_abund=False, transform=True)
     merged = ds.intersection_to_dataframe()
 
     out_dir = Path('results/heatmap_plots')

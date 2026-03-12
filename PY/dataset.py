@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import re
 from typing import Dict, List, Optional, Tuple, Set
-import random
 from scipy import stats
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
@@ -73,6 +72,7 @@ class BioSmokeDataset:
         if remove_low_expression:
             # 获取样本列（除第一列外的所有列）
             sample_cols = self.taxonomy_data.columns[1:]
+            self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             
             # 计算每个物种在多少样本中表达
             expression_counts = (self.taxonomy_data[sample_cols] > min_abund_threshold).sum(axis=1)
@@ -85,6 +85,7 @@ class BioSmokeDataset:
         # 去除异常值
         if remove_outliers:
             sample_cols = self.taxonomy_data.columns[1:]
+            self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             outlier_count = 0
             
             if outlier_method == 'iqr':
@@ -99,7 +100,7 @@ class BioSmokeDataset:
                     self.taxonomy_data.loc[outliers, col] = self.taxonomy_data.loc[outliers, col].clip(lower_bound, upper_bound)
                     outlier_count += outliers.sum()
                     
-            elif self.outlier_method == 'zscore':
+            elif outlier_method == 'zscore':
                 for col in sample_cols:
                     z_scores = np.abs(stats.zscore(self.taxonomy_data[col], nan_policy='omit'))
                     outliers = z_scores > outlier_threshold
@@ -108,10 +109,11 @@ class BioSmokeDataset:
                     self.taxonomy_data.loc[outliers, col] = median_val
                     outlier_count += outliers.sum()
             
-            print(f"去除异常值 ({self.outlier_method}方法): 处理了 {outlier_count} 个异常值")
+            print(f"去除异常值 ({outlier_method}方法): 处理了 {outlier_count} 个异常值")
         
         if relative_abund:
             # 相对丰度转换（按列/样本归一化）
+            self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             col_sums = self.taxonomy_data[sample_cols].sum(axis=0)
             col_sums = col_sums.replace(0, 1)
             self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].div(col_sums, axis=1)*100
@@ -119,15 +121,19 @@ class BioSmokeDataset:
         
         if transform:
             sample_cols = self.taxonomy_data.columns[1:]
+            self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             
             if transform_method == 'clr':
-                # CLR变换
-                self.taxonomy_data[sample_cols] = self.taxonomy_data[sample_cols].apply(lambda x: (x - x.mean()) / x.std())
-                print(f"宏基因组数据归一化 (CLR变换)")
+                # 真正的CLR变换：按样本列计算 log(x + pseudocount) - mean(log(x + pseudocount))
+                pseudo_count = 1e-9
+                clipped = self.taxonomy_data[sample_cols].clip(lower=0)
+                logged = np.log(clipped + pseudo_count)
+                self.taxonomy_data[sample_cols] = logged.sub(logged.mean(axis=0), axis=1)
+                print(f"宏基因组数据变换 (CLR)")
                 
             elif transform_method == 'log':
                 # 对数变换
-                self.taxonomy_data[sample_cols] = np.log10(self.taxonomy_data[sample_cols] + 1e-6)
+                self.taxonomy_data[sample_cols] = np.log1p(self.taxonomy_data[sample_cols].clip(lower=0))
         
         print(f"宏基因组数据预处理完成: {original_shape} -> {self.taxonomy_data.shape}\n")
     
@@ -137,9 +143,9 @@ class BioSmokeDataset:
                                      remove_outliers: bool = False,
                                      outlier_method: str = 'iqr',
                                      outlier_threshold: float = 3.0,
-                                     relative_abund: bool = True,
+                                     relative_abund: bool = False,
                                      transform: bool = False,
-                                     transform_method: str = 'log2',
+                                     transform_method: str = 'log',
                                      scale: bool = False) -> None:
         """预处理代谢组数据"""
         if self.metabolomics_data is None:
@@ -157,9 +163,10 @@ class BioSmokeDataset:
         
         metab_col = meta_data.columns[0]
         meta_data = meta_data.drop_duplicates(subset=[metab_col], keep='first')
+        sample_cols = meta_data.columns[1:]
         
         if remove_high_missing:
-            sample_cols = meta_data.columns[1:]
+            meta_data[sample_cols] = meta_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             n_samples = len(sample_cols)
             
             missing_counts = meta_data[sample_cols].isna().sum(axis=1)
@@ -176,6 +183,7 @@ class BioSmokeDataset:
         
         if remove_outliers:
             sample_cols = meta_data.columns[1:]
+            meta_data[sample_cols] = meta_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             outlier_count = 0
             
             if outlier_method == 'iqr':
@@ -203,6 +211,7 @@ class BioSmokeDataset:
         
         if relative_abund:
             # 相对丰度转换（按列/样本归一化）
+            meta_data[sample_cols] = meta_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             col_sums = meta_data[sample_cols].sum(axis=0)
             col_sums = col_sums.replace(0, 1)
             meta_data[sample_cols] = meta_data[sample_cols].div(col_sums, axis=1)*100
@@ -210,6 +219,7 @@ class BioSmokeDataset:
         
         if transform:
             sample_cols = meta_data.columns[1:]
+            meta_data[sample_cols] = meta_data[sample_cols].apply(pd.to_numeric, errors='coerce')
             
             meta_data[sample_cols] = meta_data[sample_cols].fillna(meta_data[sample_cols].median())
             
@@ -218,8 +228,15 @@ class BioSmokeDataset:
                 print(f"代谢组数据变换 (log1p)")
                 
             elif transform_method == 'log2':
-                meta_data[sample_cols] = np.log2(meta_data[sample_cols].clip(lower=1) + 1e-6)
-                print(f"代谢组数据变换 (log2)")
+                positive_vals = meta_data[sample_cols].to_numpy(dtype=float)
+                positive_vals = positive_vals[positive_vals > 0]
+                if positive_vals.size > 0:
+                    eps = min(1e-6, float(np.nanmin(positive_vals)) / 2.0)
+                    eps = max(eps, 1e-12)
+                else:
+                    eps = 1e-6
+                meta_data[sample_cols] = np.log2(meta_data[sample_cols].clip(lower=0) + eps)
+                print(f"代谢组数据变换 (log2, eps={eps:.2e})")
                 
             elif transform_method == 'sqrt':
                 meta_data[sample_cols] = np.sqrt(meta_data[sample_cols].clip(lower=0))
@@ -359,9 +376,7 @@ class BioSmokeDataset:
             # 对于健康对照组，默认不吸烟（0）
             if hasattr(self, 'df_controls'):
                 for sample_id in self.df_controls['SAMPLE_ID'].dropna().astype(str).str.strip():
-                    # 随机分配
-                    
-                    self.smoking_labels[sample_id] = 1 if random.random() < 0.232 else 0
+                    self.smoking_labels[sample_id] = 0
                     
             print(f"提取了 {len(self.smoking_labels)} 个样本的吸烟标签")
             

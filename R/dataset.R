@@ -56,7 +56,7 @@ load_taxonomy_data <- function() {
     # 去除unclassified
     species_col <- colnames(taxonomy_data)[1]
     taxonomy_data <- taxonomy_data[!grepl('unclassified', taxonomy_data[[species_col]]), ]
-    taxonomy_data <- taxonomy_data[!grepl('sp.', taxonomy_data[[species_col]]), ]
+    taxonomy_data <- taxonomy_data[!grepl('_sp', taxonomy_data[[species_col]]), ]
     taxonomy_data <- taxonomy_data[!grepl('\\[',  taxonomy_data[[species_col]]), ]
     
     cat(sprintf("宏基因组数据形状: %d行 x %d列\n", 
@@ -142,12 +142,10 @@ extract_smoking_labels <- function(df_patients, df_controls) {
       }
     }
     
-    # 对于健康对照组，根据中国人群吸烟率约23.2%随机分配
     if (!is.null(df_controls)) {
       control_ids <- trimws(as.character(na.omit(df_controls$SAMPLE_ID)))
       for (sample_id in control_ids) {
-        # 随机分配，概率为0.232
-        smoking_labels[[sample_id]] <- ifelse(runif(1) < 0.232, 1, 0)
+        smoking_labels[[sample_id]] <- 0
       }
     }
     
@@ -663,8 +661,13 @@ preprocess_taxonomy_data <- function(df,
       feature_df <- as.data.frame(mapply(function(x, s) x / s * 100, feature_df, col_sums))
       cat("宏基因组数据转换为相对丰度\n")
     }
-    
+
     if (transform && transform_method == "log") {
+      feature_df <- log1p(feature_df)
+      cat("宏基因组数据变换 (log)\n")
+    }
+    
+    if (transform && transform_method == "log2") {
       feature_df <- log2(feature_df + 1e-6)
       cat("宏基因组数据变换 (log2)\n")
     }
@@ -697,7 +700,7 @@ preprocess_metabolomics_data <- function(df,
                                          remove_outliers = FALSE,
                                          outlier_method = "iqr",
                                          outlier_threshold = 3.0,
-                                         relative_expression = TRUE,
+                                         relative_expression = FALSE,
                                          transform = FALSE,
                                          transform_method = "log",
                                          scale = FALSE) {
@@ -770,9 +773,14 @@ preprocess_metabolomics_data <- function(df,
       col_sums[col_sums == 0] <- 1
       feature_df <- as.data.frame(mapply(function(x, s) x / s * 100, feature_df, col_sums))
       cat("代谢组数据转换为相对丰度\n")
+
+    }
+    if (transform && transform_method == "log") {
+      feature_df <- log1p(feature_df)
+      cat("代谢组数据变换 (log)\n")
     }
     
-    if (transform && transform_method == "log") {
+    if (transform && transform_method == "log2") {
       feature_df <- log2(feature_df + 1e-6)
       cat("代谢组数据变换 (log2)\n")
     }
@@ -823,10 +831,37 @@ tnm_labels <- extract_tnm_labels(df_patients, df_controls)
 differentiation_labels <- extract_differentiation_labels(df_patients, df_controls)
 
 # 步骤9：预处理数据
-taxonomy_data_processed <- preprocess_taxonomy_data(taxonomy_data)
+taxonomy_data_relative <- preprocess_taxonomy_data(taxonomy_data)
 
 # 步骤10：预处理代谢组数据
-metabolomics_data_processed <- preprocess_metabolomics_data(metabolomics_data)
+metabolomics_data_relative <- preprocess_metabolomics_data(metabolomics_data)
+
+# 步骤9：预处理数据
+taxonomy_data_log <- preprocess_taxonomy_data(taxonomy_data,
+                                              remove_duplicates = TRUE,
+                                              remove_low_expression = TRUE,
+                                              expression_threshold = 0.01,
+                                              prevalence_threshold = 0.1,
+                                              remove_outliers = FALSE,
+                                              outlier_method = "iqr",
+                                              outlier_threshold = 3.0,
+                                              relative_expression = TRUE,
+                                              transform = TRUE,
+                                              transform_method = "log")
+
+# 步骤10：预处理代谢组数据
+metabolomics_data_log <- preprocess_metabolomics_data(metabolomics_data,
+                                                      remove_duplicates = TRUE,
+                                                      remove_low_expression = TRUE,
+                                                      expression_threshold = 100,
+                                                      prevalence_threshold = 0.1,
+                                                      remove_outliers = FALSE,
+                                                      outlier_method = "iqr",
+                                                      outlier_threshold = 3.0,
+                                                      relative_expression = FALSE,
+                                                      transform = TRUE,
+                                                      transform_method = "log",
+                                                      scale = FALSE)
 
 # 步骤8：合并数据
 merged_data_raw <- merge_to_dataframe(taxonomy_data, metabolomics_data,
@@ -834,7 +869,12 @@ merged_data_raw <- merge_to_dataframe(taxonomy_data, metabolomics_data,
                                   smoking_labels, gender_labels, age_labels, tnm_labels,
                                   differentiation_labels)
 
-merged_data_processed <- merge_to_dataframe(taxonomy_data_processed, metabolomics_data_processed,
+merged_data_relative <- merge_to_dataframe(taxonomy_data_relative, metabolomics_data_relative,
+                                  df_patients, df_controls, sample_ids,
+                                  smoking_labels, gender_labels, age_labels, tnm_labels,
+                                  differentiation_labels)
+
+merged_data_processed <- merge_to_dataframe(taxonomy_data_log, metabolomics_data_log,
                                   df_patients, df_controls, sample_ids,
                                   smoking_labels, gender_labels, age_labels, tnm_labels,
                                   differentiation_labels)
@@ -865,6 +905,9 @@ print(table(merged_data_processed$differentiation))
 # 保存结果到CSV文件（可选）
 write.csv(merged_data_raw, "dataset/merged_dataset_raw.csv", row.names = FALSE)
 cat("\n数据已保存到 'dataset/merged_dataset_raw.csv'\n")
+
+write.csv(merged_data_relative, "dataset/merged_dataset_relative.csv", row.names = FALSE)
+cat("\n数据已保存到 'dataset/merged_dataset_relative.csv'\n")
 
 write.csv(merged_data_processed, "dataset/merged_dataset_processed.csv", row.names = FALSE)
 cat("\n数据已保存到 'dataset/merged_dataset_processed.csv'\n")

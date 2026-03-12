@@ -26,7 +26,7 @@ theme_microbiome <- function(){
 
 # 1. 读取数据
 cat("读取合并后的数据...\n")
-merged_data <- fread("dataset/merged_dataset_processed.csv", stringsAsFactors = FALSE, data.table = FALSE)
+merged_data <- fread("dataset/merged_dataset_relative.csv", stringsAsFactors = FALSE, data.table = FALSE)
 output_dir <- file.path("results", "R_plots/lefse_analysis")
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
