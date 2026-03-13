@@ -65,8 +65,11 @@ rownames(species_matrix) <- taxonomy_data$SAMPLE_ID
 species_by_sample <- t(species_matrix)
 species_names <- rownames(species_by_sample)
 
-group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#A23B72", 
-                  "CRC_poor_diff" = "#F18F01")
+group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#F18F01", 
+                  "CRC_poor_diff" = "#D7263D")
+
+group_labels <- c("control" = "CTRL", "CRC_well_diff" = "CRC-Well", 
+                  "CRC_poor_diff" = "CRC-Poor")
 
 cat("准备分析数据...\n")
 
@@ -170,7 +173,7 @@ for (i in 1:length(comparison_groups)) {
   pcoa_plot <- ggplot(pcoa_points, aes(x = PCo1, y = PCo2, color = group_factor)) +
     geom_point(size = 3, alpha = 0.7) +
     stat_ellipse(level = 0.95, linetype = 1, size = 1) +
-    scale_color_manual(values = active_colors, drop = FALSE) +
+    scale_color_manual(values = active_colors, labels = group_labels[names(active_colors)], drop = FALSE) +
     labs(title = paste("PCoA -", comparison_name),
          subtitle = sprintf("PERMANOVA: R² = %.3f, p = %.4f", adonis_r2, adonis_pvalue),
          x = paste0("PCo1 (", pc1_var, "%)"),
@@ -310,7 +313,7 @@ for (i in 1:length(comparison_groups)) {
   metab_pcoa_plot <- ggplot(metab_pcoa_points, aes(x = PCo1, y = PCo2, color = group_factor)) +
     geom_point(size = 3, alpha = 0.7) +
     stat_ellipse(level = 0.95, linetype = 1, size = 1) +
-    scale_color_manual(values = metab_active_colors, drop = FALSE) +
+    scale_color_manual(values = metab_active_colors, labels = group_labels[names(metab_active_colors)], drop = FALSE) +
     labs(title = paste("PCoA (Metabolites) -", comparison_name),
          subtitle = sprintf("PERMANOVA: R² = %.3f, p = %.4f", adonis_metab_r2, adonis_metab_pvalue),
          x = paste0("PCo1 (", metab_pc1_var, "%)"),

@@ -68,8 +68,11 @@ species_names <- rownames(species_by_sample)
 species_names <- sub("^tax_", "", species_names)
 rownames(species_by_sample) <- species_names
 
-group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#A23B72", 
-                  "CRC_poor_diff" = "#F18F01")
+group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#F18F01", 
+                  "CRC_poor_diff" = "#D7263D")
+
+group_labels <- c("control" = "CTRL", "CRC_well_diff" = "CRC-Well", 
+                  "CRC_poor_diff" = "CRC-Poor")
 
 cat("准备分析数据...\n")
 
@@ -92,7 +95,7 @@ comparison_groups <- list(
 for (i in 1:length(comparison_groups)) {
   group1 <- comparison_groups[[i]][1]
   group2 <- comparison_groups[[i]][2]
-  comparison_name <- paste(group1, "vs", group2, sep = "_")
+  comparison_name <- paste(group_labels[group1], "vs", group_labels[group2], sep = " ")
   
   cat(sprintf("\n=== 物种火山图分析组: %s ===\n", comparison_name))
   
@@ -183,7 +186,7 @@ for (i in 1:length(comparison_groups)) {
     scale_color_manual(values = volcano_colors) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "gray50") +
     geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "gray50") +
-    labs(title = paste("Volcano Plot -", comparison_name),
+    labs(title = paste("Volcano Plot (Species) \n", comparison_name),
          subtitle = sprintf("Significant species: Up = %d, Down = %d", 
                            sum(volcano_data$significance == "Up"),
                            sum(volcano_data$significance == "Down")),
@@ -257,7 +260,7 @@ cat(sprintf("合并后代谢物分析数据: %d 个样本\n", nrow(metab_analysi
 for (i in 1:length(comparison_groups)) {
   group1 <- comparison_groups[[i]][1]
   group2 <- comparison_groups[[i]][2]
-  comparison_name <- paste(group1, "vs", group2, sep = "_")
+  comparison_name <- paste(group_labels[group1], "vs", group_labels[group2], sep = " ")
   
   cat(sprintf("\n=== 代谢物火山图分析组: %s ===\n", comparison_name))
   
@@ -352,7 +355,7 @@ for (i in 1:length(comparison_groups)) {
     scale_color_manual(values = metab_volcano_colors) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "gray50") +
     geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "gray50") +
-    labs(title = paste("Volcano Plot (Metabolites) -", comparison_name),
+    labs(title = paste("Volcano Plot (Metabolites) \n", comparison_name),
          subtitle = sprintf("Significant metabolites: Up = %d, Down = %d", 
                            sum(metab_volcano_data$significance == "Up"),
                            sum(metab_volcano_data$significance == "Down")),

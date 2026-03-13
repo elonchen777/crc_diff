@@ -845,7 +845,7 @@ taxonomy_data_log <- preprocess_taxonomy_data(taxonomy_data,
                                               remove_outliers = FALSE,
                                               outlier_method = "iqr",
                                               outlier_threshold = 3.0,
-                                              relative_expression = TRUE,
+                                              relative_expression = FALSE,
                                               transform = TRUE,
                                               transform_method = "log")
 

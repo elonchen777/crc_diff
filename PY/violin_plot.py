@@ -168,13 +168,19 @@ def plot_early_late_alpha_diversity_violin(df: pd.DataFrame,
     """
     # 定义3个分组的顺序
     group_order = ['CTRL', 'CRC_welldiff', 'CRC_poordiff']
+
+    plot_group_name = {
+        'CTRL': 'CTRL',
+        'CRC_welldiff': 'CRC-Well',
+        'CRC_poordiff': 'CRC-Poor'
+    }
     
     # 默认颜色映射
     if colors is None:
         colors = {
-            'CRC_poordiff': '#FF6B6B',
-            'CRC_welldiff': '#FFD166',
-            'CTRL': '#06D6A0'
+            'CRC_poordiff': '#D7263D',
+            'CRC_welldiff': '#F18F01',
+            'CTRL': '#2E86AB'
         }
     
     # 筛选出3个分组的数据
@@ -211,7 +217,7 @@ def plot_early_late_alpha_diversity_violin(df: pd.DataFrame,
 
     # 设置图表标题和标签
     ax.set_title(title, fontsize=18, fontweight='bold', pad=25)
-    ax.set_xlabel('CRC Differentiation', fontsize=14)
+    ax.set_xlabel('Group', fontsize=14)
     ax.set_ylabel('Alpha Diversity Index (Shannon)', fontsize=14)
 
     # 获取y轴范围
@@ -281,7 +287,7 @@ def plot_early_late_alpha_diversity_violin(df: pd.DataFrame,
     ax.set_ylim(y_min, y_max + y_range * 0.25)
     
     # 旋转x轴标签
-    plt.xticks(rotation=45, ha='right', fontsize=12)
+    plt.xticks(ticks=range(len(group_order)), labels=[plot_group_name[g] for g in group_order], rotation=45, ha='right', fontsize=12)
     plt.yticks(fontsize=12)
     plt.tight_layout()
     

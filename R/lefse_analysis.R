@@ -24,6 +24,22 @@ theme_microbiome <- function(){
   ) 
 } 
 
+# 兼容不同microeco版本的方法调用，避免“非函数不可调用”错误
+call_microeco_step <- function(obj, step_name) {
+  obj_method <- tryCatch(obj[[step_name]], error = function(e) NULL)
+  if (is.function(obj_method)) {
+    obj_method()
+    return(TRUE)
+  }
+  pkg_method <- tryCatch(get(step_name, envir = asNamespace("microeco")), error = function(e) NULL)
+  if (is.function(pkg_method)) {
+    pkg_method(obj)
+    return(TRUE)
+  }
+  cat(sprintf("提示: 未找到可调用的 %s，已跳过该步骤。\n", step_name))
+  return(FALSE)
+}
+
 # 1. 读取数据
 cat("读取合并后的数据...\n")
 merged_data <- fread("dataset/merged_dataset_relative.csv", stringsAsFactors = FALSE, data.table = FALSE)
@@ -114,6 +130,15 @@ for (i in 1:nrow(tax_table)) {
 rownames(tax_table) <- tax_table$Species
 tax_table <- tax_table[, -1, drop = FALSE]
 
+# 统一为LEfSe所需的标准分类前缀
+tax_table$Kingdom <- paste0("k__", gsub("^k__", "", tax_table$Kingdom))
+tax_table$Phylum <- "p__Unclassified"
+tax_table$Class <- "c__Unclassified"
+tax_table$Order <- "o__Unclassified"
+tax_table$Family <- "f__Unclassified"
+tax_table$Genus <- paste0("g__", gsub("^g__", "", tax_table$Genus))
+tax_table$Species <- paste0("s__", gsub("^tax_s__", "", rownames(tax_table)))
+
 # 6. 创建microtable对象
 cat("创建microtable对象...\n")
 # 转换为data.frame格式
@@ -123,6 +148,10 @@ dataset <- microtable$new(
   otu_table = otu_table_df,
   tax_table = tax_table
 )
+
+# 按microeco建议，先整理taxonomy再重算丰度对象，避免LEfSe前缀校验报错
+call_microeco_step(dataset, "tidy_taxonomy")
+call_microeco_step(dataset, "cal_abund")
 
 cat(sprintf("microtable对象创建成功: %d 样本, %d 物种\n", 
             nrow(dataset$sample_table), nrow(dataset$otu_table)))
@@ -135,8 +164,11 @@ comparison_groups <- list(
 )
 
 # 定义分组颜色映射
-group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#A23B72", 
-                  "CRC_poor_diff" = "#F18F01")
+group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#F18F01", 
+                  "CRC_poor_diff" = "#D7263D")
+
+group_labels <- c("control" = "CTRL", "CRC_well_diff" = "CRC-Well", 
+                  "CRC_poor_diff" = "CRC-Poor")
 
 # 8. 对每个比较组进行LEFSE分析
 cat("\n========== 开始LEFSE差异分析 (microeco) ==========\n")
@@ -144,7 +176,7 @@ cat("\n========== 开始LEFSE差异分析 (microeco) ==========\n")
 for (i in 1:length(comparison_groups)) {
   group1 <- comparison_groups[[i]][1]
   group2 <- comparison_groups[[i]][2]
-  comparison_name <- paste(group1, "vs", group2, sep = "_")
+  comparison_name <- paste(group_labels[group1], "vs", group_labels[group2], sep = " ")
   
   cat(sprintf("\n=== LEFSE分析组: %s ===\n", comparison_name))
   
@@ -163,6 +195,9 @@ for (i in 1:length(comparison_groups)) {
   dataset_sub$sample_table <- dataset$sample_table[current_sample_names, , drop = FALSE]
   # otu_table: 行为物种，列为样本，需要按列（样本名）筛选，转换为data.frame
   dataset_sub$otu_table <- as.data.frame(dataset$otu_table[, current_sample_names, drop = FALSE])
+  dataset_sub$tax_table <- dataset$tax_table[rownames(dataset_sub$otu_table), , drop = FALSE]
+  call_microeco_step(dataset_sub, "tidy_taxonomy")
+  call_microeco_step(dataset_sub, "cal_abund")
   
   # 确保两组都有足够的样本
   group1_n <- sum(dataset_sub$sample_table$Group == group1)
@@ -185,6 +220,7 @@ for (i in 1:length(comparison_groups)) {
       method = "lefse",
       group = "Group",
       alpha = 0.01,
+      taxa_level = "Species",
       lefse_subgroup = NULL
     )
     
@@ -213,9 +249,16 @@ for (i in 1:length(comparison_groups)) {
     
     # 根据分组筛选各组前20个
     group1_species <- lefse_df[lefse_df$Group == group1, ]
-    group1_species <- group1_species[group1_species$lefse_df < 0.05, ]
     group2_species <- lefse_df[lefse_df$Group == group2, ]
-    group2_species <- group2_species[group2_species$lefse_df < 0.05, ]
+
+    # 兼容不同microeco版本的P值列名
+    p_col <- c("P.unadj", "P.adj", "pvalue", "P")
+    p_col <- p_col[p_col %in% colnames(lefse_df)]
+    if (length(p_col) > 0) {
+      p_col <- p_col[1]
+      group1_species <- group1_species[group1_species[[p_col]] < 0.05, ]
+      group2_species <- group2_species[group2_species[[p_col]] < 0.05, ]
+    }
     
     # 按LDA得分排序，取前20
     if (nrow(group1_species) > 0) {
@@ -239,6 +282,8 @@ for (i in 1:length(comparison_groups)) {
       # 提取物种名称（只保留最后一部分，去掉分类前缀）
       plot_data$Species_short <- sapply(plot_data$Taxa, function(x) {
         parts <- strsplit(as.character(x), "\\|")[[1]]
+        #去除s__前缀
+        parts <- gsub("s__", "", parts)
         return(tail(parts, 1))
       })
       
@@ -261,21 +306,24 @@ for (i in 1:length(comparison_groups)) {
         geom_bar(stat = "identity", width = 0.7) +
         scale_fill_identity() +
         geom_vline(xintercept = 0, linetype = "solid", color = "black", size = 0.5) +
+        geom_text(data = plot_data, aes(x = ifelse(LDA_plot < 0, 0.05, -0.05), 
+                                        y = Species_short, label = Species_short), 
+                  hjust = ifelse(plot_data$LDA_plot < 0, 0, 1), size = 3, color = "black") +
         labs(title = paste("LEFSe Analysis -", comparison_name),
              x = "LDA Score (log10)",
-             y = "Species") +
+             y = NULL) +
         theme_microbiome() +
         theme(
           plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
-          axis.text.y = element_text(size = 8, face = "italic"),
-          plot.margin = margin(t = 20, r = 60, b = 20, l = 10)
+          axis.text.y = element_blank(),
+          # plot.margin = margin(t = 20, r = 60, b = 20, l = 10)
         ) +
         # 添加分组标签在侧边
         annotate("text", x = -max(abs(plot_data$LDA_plot)) * 1.15, y = nrow(plot_data)/2, 
-                 label = group1, color = group_colors[group1], 
+                 label = group_labels[group1], color = group_colors[group1], 
                  fontface = "bold", size = 5, angle = 90) +
         annotate("text", x = max(abs(plot_data$LDA_plot)) * 1.15, y = nrow(plot_data)/2, 
-                 label = group2, color = group_colors[group2], 
+                 label = group_labels[group2], color = group_colors[group2], 
                  fontface = "bold", size = 5, angle = 90)
       
       ggsave(file.path(output_dir, paste0("LEFSE_barplot_", comparison_name, ".png")),
@@ -283,20 +331,20 @@ for (i in 1:length(comparison_groups)) {
       cat(sprintf("LEFSE条形图已保存: LEFSE_barplot_%s.png\n", comparison_name))
     }
     
-    # 绘制LEFSE Cladogram
-    cat("绘制LEFSE Cladogram...\n")
-    p_clado <- lefse_result$plot_diff_cladogram(
-      use_taxa_num = 100,
-      use_feature_num = 30,
-      clade_label_level = 6,
-      group_order = c(group1, group2)
-    )
+    # # 绘制LEFSE Cladogram
+    # cat("绘制LEFSE Cladogram...\n")
+    # p_clado <- lefse_result$plot_diff_cladogram(
+    #   use_taxa_num = 100,
+    #   use_feature_num = 30,
+    #   clade_label_level = 6,
+    #   group_order = c(group1, group2)
+    # )
     
-    if (!is.null(p_clado)) {
-      ggsave(file.path(output_dir, paste0("LEFSE_cladogram_", comparison_name, ".png")),
-             p_clado, width = 12, height = 10, dpi = 300)
-      cat(sprintf("LEFSE Cladogram已保存: LEFSE_cladogram_%s.png\n", comparison_name))
-    }
+    # if (!is.null(p_clado)) {
+    #   ggsave(file.path(output_dir, paste0("LEFSE_cladogram_", comparison_name, ".png")),
+    #          p_clado, width = 12, height = 10, dpi = 300)
+    #   cat(sprintf("LEFSE Cladogram已保存: LEFSE_cladogram_%s.png\n", comparison_name))
+    # }
     
   }, error = function(e) {
     cat(sprintf("LEFSE分析出错: %s\n", e$message))
