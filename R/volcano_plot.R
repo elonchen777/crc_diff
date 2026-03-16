@@ -29,6 +29,52 @@ merged_data <- fread("dataset/merged_dataset_relative.csv", stringsAsFactors = F
 output_dir <- file.path("results", "R_plots/volcano_plot")
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
+FIXED_SPECIES_LIST <- c(
+  "Peptostreptococcus_stomatis",
+  "Porphyromonas_gingivalis",
+  "Prevotella_intermedia",
+  "Fusobacterium_periodonticum",
+  "Campylobacter_rectus",
+  "Faecalibacterium_prausnitzii",
+  "Roseburia_intestinalis",
+  "Eubacterium_rectale",
+  "Coprococcus_comes",
+  "Ruminococcus_lactaris"
+)
+
+FIXED_METABOLITES_LIST <- c(
+  "SQDG 26:2; SQDG(13:1/13:1)",
+  "Cytosine",
+  "Perfluorooctanesulfonic acid",
+  "Methyl dihydrojasmonate",
+  "Pyrogallol-2-O-sulphate",
+  "5'-(3',4'-Dihydroxyphenyl)-gamma-valerolactone sulfate",
+  "2-Hydroxy-4,7-dimethoxy-2H-1,4-benzoxazin-3(4H)-one",
+  "trans-3,5-Dimethoxy-4-hydroxycinnamaldehyde",
+  "(R)-3-Hydroxy-5-phenylpentanoic acid",
+  "N-Methyl-D-glucamine"
+  # "Chenodeoxycholic acid sulfate",
+  # "Creatinine",
+  # "Lucidenic acid F",
+  # "Demissidine",
+  # "Alpha-Hydroxyisobutyric acid",
+  # "Pyrocatechol",
+  # "Gentisic acid",
+  # "D-Galacturonic acid",
+  # "1,3-Dimethyluric acid",
+  # "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate"
+)
+
+normalize_feature_name <- function(x) {
+  x <- trimws(as.character(x))
+  x <- tolower(x)
+  x <- gsub("^s__", "", x)
+  x <- gsub("[^a-z0-9]+", "_", x)
+  x <- gsub("_+", "_", x)
+  x <- gsub("^_|_$", "", x)
+  x
+}
+
 prepare_diff_groups <- function(df) {
   cat("根据分化程度和吸烟状态创建分组...\n")
   
@@ -178,6 +224,10 @@ for (i in 1:length(comparison_groups)) {
   volcano_data$significance <- "Not Significant"
   volcano_data$significance[volcano_data$p_adj < 0.05 & volcano_data$log2FC > 0] <- "Up"
   volcano_data$significance[volcano_data$p_adj < 0.05 & volcano_data$log2FC < 0] <- "Down"
+  volcano_data$species_label <- sub("^s__", "", volcano_data$species)
+  volcano_data$species_label_expr <- paste0("italic('", gsub("'", "\\\\'", volcano_data$species_label), "')")
+  fixed_species_key <- normalize_feature_name(FIXED_SPECIES_LIST)
+  volcano_data$is_fixed_species <- normalize_feature_name(volcano_data$species_label) %in% fixed_species_key
   
   volcano_colors <- c("Up" = "#E74C3C", "Down" = "#3498DB", "Not Significant" = "#95A5A6")
   
@@ -186,7 +236,7 @@ for (i in 1:length(comparison_groups)) {
     scale_color_manual(values = volcano_colors) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "gray50") +
     geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "gray50") +
-    labs(title = paste("Volcano Plot (Species) \n", comparison_name),
+    labs(title = paste("Volcano Plot (Microbiome) \n", comparison_name),
          subtitle = sprintf("Significant species: Up = %d, Down = %d", 
                            sum(volcano_data$significance == "Up"),
                            sum(volcano_data$significance == "Down")),
@@ -198,14 +248,17 @@ for (i in 1:length(comparison_groups)) {
           plot.subtitle = element_text(hjust = 0.5, size = 10),
           legend.position = "right")
   
-  if (nrow(significant_species) > 0) {
-    top_species <- head(significant_species, 10)
+  fixed_species_data <- volcano_data[volcano_data$is_fixed_species, ]
+  if (nrow(fixed_species_data) > 0) {
     volcano_plot <- volcano_plot +
-      geom_text_repel(data = volcano_data[volcano_data$species %in% top_species$species, ],
-                      aes(label = species), size = 3, color = "black",
+      geom_text_repel(data = fixed_species_data,
+                      aes(label = species_label_expr), parse = TRUE, size = 3, color = "black",
                       segment.color = "gray50", segment.alpha = 0.6,
                       point.padding = 0.3, box.padding = 0.5,
                       max.overlaps = 20)
+    cat(sprintf("固定物种标注数量: %d\n", nrow(fixed_species_data)))
+  } else {
+    cat("固定物种列表在当前比较中无匹配，未添加物种标注\n")
   }
   
   ggsave(file.path(output_dir, paste0("Volcano_species_", comparison_name, ".png")), 
@@ -347,6 +400,9 @@ for (i in 1:length(comparison_groups)) {
   metab_volcano_data$significance <- "Not Significant"
   metab_volcano_data$significance[metab_volcano_data$p_adj < 0.05 & metab_volcano_data$log2FC > 0] <- "Up"
   metab_volcano_data$significance[metab_volcano_data$p_adj < 0.05 & metab_volcano_data$log2FC < 0] <- "Down"
+  metab_volcano_data$metabolite_label <- metab_volcano_data$metabolite
+  fixed_metabolite_key <- normalize_feature_name(FIXED_METABOLITES_LIST)
+  metab_volcano_data$is_fixed_metabolite <- normalize_feature_name(metab_volcano_data$metabolite_label) %in% fixed_metabolite_key
   
   metab_volcano_colors <- c("Up" = "#E74C3C", "Down" = "#3498DB", "Not Significant" = "#95A5A6")
   
@@ -367,14 +423,17 @@ for (i in 1:length(comparison_groups)) {
           plot.subtitle = element_text(hjust = 0.5, size = 10),
           legend.position = "right")
   
-  if (nrow(significant_metabolites) > 0) {
-    top_metabolites <- head(significant_metabolites, 10)
+  fixed_metabolite_data <- metab_volcano_data[metab_volcano_data$is_fixed_metabolite, ]
+  if (nrow(fixed_metabolite_data) > 0) {
     metab_volcano_plot <- metab_volcano_plot +
-      geom_text_repel(data = metab_volcano_data[metab_volcano_data$metabolite %in% top_metabolites$metabolite, ],
-                      aes(label = metabolite), size = 3, color = "black",
+      geom_text_repel(data = fixed_metabolite_data,
+                      aes(label = metabolite_label), size = 3, color = "black",
                       segment.color = "gray50", segment.alpha = 0.6,
                       point.padding = 0.3, box.padding = 0.5,
                       max.overlaps = 20)
+    cat(sprintf("固定代谢物标注数量: %d\n", nrow(fixed_metabolite_data)))
+  } else {
+    cat("固定代谢物列表在当前比较中无匹配，未添加代谢物标注\n")
   }
   
   ggsave(file.path(output_dir, paste0("Volcano_metabolites_", comparison_name, ".png")), 

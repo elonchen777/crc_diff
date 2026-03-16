@@ -21,8 +21,8 @@ theme_microbiome <- function(){
   ) 
 } 
 
-group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#A23B72", 
-                  "CRC_poor_diff" = "#F18F01")
+group_colors <- c("control" = "#2E86AB", "CRC_well_diff" = "#F18F01", 
+                  "CRC_poor_diff" = "#D7263D")
 
 input_path <- "results/maaslin2/significant_results.tsv"
 target_metadata <- "diff_stage"
@@ -61,7 +61,7 @@ maaslin_data <- readr::read_tsv(input_path)
 available_features <- unique(maaslin_data$feature)
 target_features <- match_species_to_cols(target_features, available_features)
 
-output_path <- "results/maaslin2/diff_stage_coef_lollipop.png"
+output_path <- "results/R_plots/lollipop_plot/diff_lollipop_plot.png"
 
 # helpers ------------------------------------------------------------------
 star_from_qval <- function(qval) {
@@ -98,9 +98,11 @@ plot_data <- plot_data %>%
   )
 
 plot <- ggplot(plot_data, aes(x = coef, y = feature)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", size = 0.5) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "black", size = 0.5) +
   geom_segment(aes(x = 0, xend = coef, yend = feature, color = coef > 0), size = 1.2, alpha = 0.7) +
   geom_point(aes(color = coef > 0, size = -log10(qval)), alpha = 0.9) +
+  geom_text(aes(x = ifelse(coef < 0, 0.02, -0.02), label = feature),
+            hjust = ifelse(plot_data$coef < 0, 0, 1), size = 3, color = "black", fontface = "italic") +
   geom_text(data = filter(plot_data, qval_star != ""),
             aes(x = star_x, label = qval_star),
             color = "black", size = 5, vjust = 0.7) +
@@ -108,25 +110,28 @@ plot <- ggplot(plot_data, aes(x = coef, y = feature)) +
                      labels = c("TRUE" = "Enriched", "FALSE" = "Depleted"),
                      name = "Association") +
   scale_size_continuous(range = c(3, 7), name = "-log10(q-value)") +
-  annotate("text", x = -Inf, y = Inf, label = "* q ≤ 0.05, ** q ≤ 0.01, *** q ≤ 0.001",
-           hjust = -0.05, vjust = 1.5, size = 3, fontface = "italic") +
-  scale_x_continuous(expand = expansion(mult = c(0.2, 0.2))) +
   labs(
     title = "Differential Taxa by Disease Stage",
     subtitle = "Maaslin2 Linear Model Coefficients",
     x = "Coefficient (Effect Size)",
-    y = NULL
+    y = NULL,
+    caption = "* q ≤ 0.05, ** q ≤ 0.01, *** q ≤ 0.001"
   ) +
   theme_microbiome() +
   theme(
     panel.grid.major.y = element_blank(),
     panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank(),
     axis.line.x = element_line(color = "black", linewidth = 0.5),
-    axis.text.y = element_text(face = "italic", color = "black", hjust = 1, margin = margin(r = 10)),
+    axis.text.y = element_blank(),
     axis.text.x = element_text(color = "black"),
     legend.position = "right",
+    legend.box = "vertical",
+    legend.spacing.y = unit(0.2, "cm"),
     plot.title = element_text(face = "bold", hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5, color = "gray30")
+    plot.subtitle = element_text(hjust = 0.5, color = "gray30"),
+    plot.caption = element_text(hjust = 1, size = 8, face = "italic")
   )
 
 plot_height <- max(5, nrow(plot_data) * 0.5)

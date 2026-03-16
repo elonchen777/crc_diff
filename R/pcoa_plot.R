@@ -174,7 +174,7 @@ for (i in 1:length(comparison_groups)) {
     geom_point(size = 3, alpha = 0.7) +
     stat_ellipse(level = 0.95, linetype = 1, size = 1) +
     scale_color_manual(values = active_colors, labels = group_labels[names(active_colors)], drop = FALSE) +
-    labs(title = paste("PCoA -", comparison_name),
+    labs(title = "PCoA (Microbiome)",
          subtitle = sprintf("PERMANOVA: R² = %.3f, p = %.4f", adonis_r2, adonis_pvalue),
          x = paste0("PCo1 (", pc1_var, "%)"),
          y = paste0("PCo2 (", pc2_var, "%)"),
@@ -314,7 +314,7 @@ for (i in 1:length(comparison_groups)) {
     geom_point(size = 3, alpha = 0.7) +
     stat_ellipse(level = 0.95, linetype = 1, size = 1) +
     scale_color_manual(values = metab_active_colors, labels = group_labels[names(metab_active_colors)], drop = FALSE) +
-    labs(title = paste("PCoA (Metabolites) -", comparison_name),
+    labs(title = "PCoA (Metabolites)",
          subtitle = sprintf("PERMANOVA: R² = %.3f, p = %.4f", adonis_metab_r2, adonis_metab_pvalue),
          x = paste0("PCo1 (", metab_pc1_var, "%)"),
          y = paste0("PCo2 (", metab_pc2_var, "%)"),

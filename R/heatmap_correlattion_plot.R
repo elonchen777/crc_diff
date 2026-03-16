@@ -87,26 +87,47 @@ make_corr_heatmap <- function(group_name, title_label, col_title_color) {
     column_title_gp  = gpar(fontsize = 12, fontface = "bold",
                              col = col_title_color),
     width  = unit(6, "cm"),
-    height = unit(6, "cm")
+    height = unit(6, "cm"),
+    show_heatmap_legend = (group_name == "control") # 只在第一个图中显示图例
   )
 }
 
-ht_ctrl      <- make_corr_heatmap("control",       "Control",       "#2E86AB")
-ht_well      <- make_corr_heatmap("CRC_well_diff", "CRC well-diff", "#A23B72")
-ht_poor      <- make_corr_heatmap("CRC_poor_diff", "CRC poor-diff", "#F18F01")
+ht_ctrl      <- make_corr_heatmap("control",       "Ctrl",       "#2E86AB")
+ht_well      <- make_corr_heatmap("CRC_well_diff", "CRC-Well", "#A23B72")
+ht_poor      <- make_corr_heatmap("CRC_poor_diff", "CRC-Poor", "#F18F01")
 
+
+# 生成图例
+lgd_sig = Legend(labels = c("p <= 0.05", "p <= 0.01", "p <= 0.001"), 
+                 title = "Significance:", direction = "horizontal",
+                 nrow = 1, # 强制平铺在一行
+                 grid_height = unit(6, "mm"), grid_width = unit(6, "mm"), # 增加间距
+                 labels_gp = gpar(fontsize = 10),
+                 title_gp = gpar(fontsize = 11, fontface = "bold"),
+                 type = "points", pch = NA,
+                 graphics = list(
+                   function(x, y, w, h) grid.text("*", x, y, gp = gpar(fontsize = 12)),
+                   function(x, y, w, h) grid.text("**", x, y, gp = gpar(fontsize = 12)),
+                   function(x, y, w, h) grid.text("***", x, y, gp = gpar(fontsize = 12))
+                 ))
 
 png(file.path(output_dir, "heatmap_3groups.png"),
-    width = 18, height = 7, units = "in", res = 300)
+    width = 18, height = 8, units = "in", res = 300)
 draw(ht_ctrl + ht_well + ht_poor,
      column_title = "Microbial Correlation Heatmaps across CRC Subtypes",
-     column_title_gp = gpar(fontsize = 15, fontface = "bold"))
+     column_title_gp = gpar(fontsize = 15, fontface = "bold"),
+     heatmap_legend_side = "right",
+     annotation_legend_side = "bottom",
+     annotation_legend_list = list(lgd_sig))
 dev.off()
 
 pdf(file.path(output_dir, "heatmap_3groups.pdf"),
-    width = 18, height = 7)
+    width = 18, height = 8)
 draw(ht_ctrl + ht_well + ht_poor,
      column_title = "Microbial Correlation Heatmaps across CRC Subtypes",
-     column_title_gp = gpar(fontsize = 15, fontface = "bold"))
+     column_title_gp = gpar(fontsize = 15, fontface = "bold"),
+     heatmap_legend_side = "right",
+     annotation_legend_side = "bottom",
+     annotation_legend_list = list(lgd_sig))
 dev.off()
 message("Done: ", output_dir)

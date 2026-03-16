@@ -308,7 +308,7 @@ for (i in 1:length(comparison_groups)) {
         geom_vline(xintercept = 0, linetype = "solid", color = "black", size = 0.5) +
         geom_text(data = plot_data, aes(x = ifelse(LDA_plot < 0, 0.05, -0.05), 
                                         y = Species_short, label = Species_short), 
-                  hjust = ifelse(plot_data$LDA_plot < 0, 0, 1), size = 3, color = "black") +
+                  hjust = ifelse(plot_data$LDA_plot < 0, 0, 1), size = 3, color = "black", fontface = "italic") +
         labs(title = paste("LEFSe Analysis -", comparison_name),
              x = "LDA Score (log10)",
              y = NULL) +
@@ -316,13 +316,15 @@ for (i in 1:length(comparison_groups)) {
         theme(
           plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
           axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.line.x = element_line(color = "black", linewidth = 0.8)
           # plot.margin = margin(t = 20, r = 60, b = 20, l = 10)
         ) +
         # 添加分组标签在侧边
-        annotate("text", x = -max(abs(plot_data$LDA_plot)) * 1.15, y = nrow(plot_data)/2, 
+        annotate("text", x = -max(abs(plot_data$LDA_plot)) * 1.05, y = nrow(plot_data)/2, 
                  label = group_labels[group1], color = group_colors[group1], 
                  fontface = "bold", size = 5, angle = 90) +
-        annotate("text", x = max(abs(plot_data$LDA_plot)) * 1.15, y = nrow(plot_data)/2, 
+        annotate("text", x = max(abs(plot_data$LDA_plot)) * 1.05, y = nrow(plot_data)/2, 
                  label = group_labels[group2], color = group_colors[group2], 
                  fontface = "bold", size = 5, angle = 90)
       

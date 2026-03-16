@@ -22,6 +22,16 @@ def plot_microbial_progression(df, target_species, output_dir):
     group_order = ['CTRL', 'CRC_welldiff', 'CRC_poordiff']
     df = df[df['group'].isin(group_order)].copy()
     df['group'] = pd.Categorical(df['group'], categories=group_order, ordered=True)
+
+    # 映射分组名称
+    group_mapping = {
+        "CTRL": "CTRL",
+        "CRC_welldiff": "CRC-Well",
+        "CRC_poordiff": "CRC-Poor"
+    }
+    df['display_group'] = df['group'].map(group_mapping)
+    display_group_order = [group_mapping[g] for g in group_order]
+    df['display_group'] = pd.Categorical(df['display_group'], categories=display_group_order, ordered=True)
     
     # 2. 匹配物种列名
     species_cols = [col for col in df.columns if col.startswith('tax_s__')]
@@ -41,7 +51,7 @@ def plot_microbial_progression(df, target_species, output_dir):
     plt.figure(figsize=(10, 6))
     
     # 按分组排序样本
-    plot_df = df.sort_values('group')
+    plot_df = df.sort_values('display_group')
     heatmap_data = plot_df[matched_cols].T
     
     # Z-score 标准化
@@ -54,14 +64,14 @@ def plot_microbial_progression(df, target_species, output_dir):
     # 在顶部添加分组背景色/标签
     ax = plt.gca()
     n_samples = plot_df.shape[0]
-    group_counts = plot_df['group'].value_counts().reindex(group_order)
+    group_counts = plot_df['display_group'].value_counts().reindex(display_group_order)
     
     start = 0
-    colors = ['#2E86AB', '#A23B72', '#F18F01'] # CTRL, Well, Poor
+    colors = ['#2E86AB', '#F18F01', '#D7263D'] # CTRL, Well, Poor
     for i, count in enumerate(group_counts):
         if count > 0:
-            ax.axvspan(start, start + count, color=colors[i], alpha=0.3, label=group_order[i])
-            plt.text(start + count/2, -0.5, group_order[i], ha='center', fontweight='bold')
+            ax.axvspan(start, start + count, color=colors[i], alpha=0.3, label=display_group_order[i])
+            plt.text(start + count/2, -0.5, display_group_order[i], ha='center', fontweight='bold')
             start += count
 
     plt.title("Microbial Progression Heatmap (Z-score)", fontsize=14)
@@ -79,10 +89,10 @@ def plot_microbial_progression(df, target_species, output_dir):
     for i, col in enumerate(matched_cols):
         ax = axes[i]
         # Remove outliers by setting showfliers=False
-        sns.boxplot(data=df, x='group', y=col, order=group_order, 
+        sns.boxplot(data=df, x='display_group', y=col, order=display_group_order, 
                     palette=colors, ax=ax, showfliers=False)
         # Stripplot with small size and alpha for individual distributions
-        sns.stripplot(data=df, x='group', y=col, order=group_order, 
+        sns.stripplot(data=df, x='display_group', y=col, order=display_group_order, 
                       color='black', size=1.5, alpha=0.2, ax=ax)
         
         # Clean up labels and title
@@ -93,7 +103,7 @@ def plot_microbial_progression(df, target_species, output_dir):
         ax.tick_params(axis='both', labelsize=8)
         
         # Adjust y-limit to focus on box part
-        group_stats = df.groupby('group')[col].describe()
+        group_stats = df.groupby('display_group')[col].describe()
         upper_whisker = (group_stats['75%'] + 1.5 * (group_stats['75%'] - group_stats['25%'])).max()
         y_max = upper_whisker * 1.2
         ax.set_ylim(bottom=df[col].min() * 0.9, top=y_max)
@@ -101,17 +111,17 @@ def plot_microbial_progression(df, target_species, output_dir):
         # --- Add P-values (Pairwise Wilcoxon/Mann-Whitney) ---
         # Define comparisons: (group1, group2, x1, x2, y_offset_factor)
         comparisons = [
-            ('CTRL', 'CRC_welldiff', 0, 1, 0.05),
-            ('CRC_welldiff', 'CRC_poordiff', 1, 2, 0.05),
-            ('CTRL', 'CRC_poordiff', 0, 2, 0.18)
+            (group_mapping['CTRL'], group_mapping['CRC_welldiff'], 0, 1, 0.05),
+            (group_mapping['CRC_welldiff'], group_mapping['CRC_poordiff'], 1, 2, 0.05),
+            (group_mapping['CTRL'], group_mapping['CRC_poordiff'], 0, 2, 0.18)
         ]
         
         y_range = y_max - df[col].min()
         base_y = upper_whisker
         
         for g1, g2, x1, x2, offset in comparisons:
-            data1 = df[df['group'] == g1][col]
-            data2 = df[df['group'] == g2][col]
+            data1 = df[df['display_group'] == g1][col]
+            data2 = df[df['display_group'] == g2][col]
             
             if len(data1) > 0 and len(data2) > 0:
                 stat, p = stats.mannwhitneyu(data1, data2, alternative='two-sided')
@@ -137,6 +147,13 @@ def plot_microbial_progression(df, target_species, output_dir):
     # 移除多余的子图
     for j in range(i + 1, len(axes)):
         fig.delaxes(axes[j])
+
+    # 在图底部添加 P 值显著性图例
+    fig.text(
+        0.5, - 0.02, 
+        'Significance: *** p < 0.001, ** p < 0.01, * p < 0.05', 
+        ha='center', fontsize=10, style='italic', fontweight='bold'
+    )
         
     plt.tight_layout()
     plt.savefig(output_dir / "taxa_progression_boxplot.png", dpi=300, bbox_inches='tight')

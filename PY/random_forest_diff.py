@@ -16,21 +16,21 @@ from split_group import prepare_crc_diff_groups
 
 GROUP_MAP = {
     'CTRL': 'CTRL',
-    'CRC_welldiff': 'WELL',
-    'CRC_poordiff': 'POOR',
+    'CRC_welldiff': 'CRC-Well',
+    'CRC_poordiff': 'CRC-Poor',
 }
 
 LABEL_MAP = {
     'CTRL': 0,
-    'WELL': 1,
-    'POOR': 2,
+    'CRC-Well': 1,
+    'CRC-Poor': 2,
 }
 
-CLASS_ORDER = ['CTRL', 'WELL', 'POOR']
+CLASS_ORDER = ['CTRL', 'CRC-Well', 'CRC-Poor']
 CLASS_COLORS = {
     'CTRL': '#2E86AB',
-    'WELL': '#F4A261',
-    'POOR': '#D1495B',
+    'CRC-Well': '#F18F01',
+    'CRC-Poor': '#D7263D',
 }
 
 
