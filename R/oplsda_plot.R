@@ -21,7 +21,7 @@ theme_microbiome <- function() {
 }
 
 cat("读取合并后的数据...\n")
-merged_data <- fread("dataset/merged_dataset_processed.csv", stringsAsFactors = FALSE, data.table = FALSE)
+merged_data <- fread("dataset/merged_dataset_relative.csv", stringsAsFactors = FALSE, data.table = FALSE)
 
 output_dir <- file.path("results", "R_plots", "oplsda_plot")
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
@@ -176,20 +176,35 @@ for (i in seq_along(comparison_groups)) {
   )
 
   score_mn <- as.data.frame(ropls::getScoreMN(model))
-#   if (ncol(score_mn) < 2) {
-#     cat("模型得分维度不足2，跳过该比较\n")
-#     next
-#   }
+  
+  # 检查得分矩阵是否为空
+  if (nrow(score_mn) == 0) {
+    cat("模型得分矩阵为空，跳过该比较\n")
+    next
+  }
 
   x_comp <- colnames(score_mn)[1]
-  y_comp <- if ("o1" %in% colnames(score_mn)) "o1" else colnames(score_mn)[2]
+  y_comp <- if ("o1" %in% colnames(score_mn)) {
+    "o1"
+  } else if (ncol(score_mn) >= 2) {
+    colnames(score_mn)[2]
+  } else {
+    # 如果只有一维得分（可能是由于 ropls 的某些模型特性），伪造一个 Y 轴用于绘图
+    cat("模型只有一维得分，将添加随机抖动作为 Y 轴以进行二维可视化\n")
+    "jitter_y"
+  }
 
   score_df <- data.frame(
     SAMPLE_ID = rownames(score_mn),
     X = score_mn[[x_comp]],
-    Y = score_mn[[y_comp]],
     group = current_data$group[match(rownames(score_mn), current_data$SAMPLE_ID)]
   )
+  
+  if (y_comp == "jitter_y") {
+    score_df$Y <- rnorm(nrow(score_df), 0, 0.05)
+  } else {
+    score_df$Y <- score_mn[[y_comp]]
+  }
 
   summary_df <- as.data.frame(ropls::getSummaryDF(model))
   r2y <- if ("R2Y(cum)" %in% colnames(summary_df)) summary_df[1, "R2Y(cum)"] else NA
@@ -207,7 +222,7 @@ for (i in seq_along(comparison_groups)) {
       drop = FALSE
     ) +
     labs(
-      title = paste("OPLS-DA (Metabolites) -", comparison_name),
+      title = "OPLS-DA (Metabolites)",
       subtitle = subtitle_text,
       x = paste0(x_comp, " score"),
       y = paste0(y_comp, " score"),

@@ -10,7 +10,9 @@ class BioSmokeDataset:
     def __init__(self, 
                  sample_file: str = 'dataset/id_sample.xlsx',
                  taxonomy_file: str = 'dataset/taxonomy_Species_abund.txt',
-                 metabolomics_file: str = 'dataset/metabolome_data.csv'):   
+                 metabolomics_file: str = 'dataset/metabolome_data.csv',
+                 kegg_file: str = 'dataset/KEGG/4_KOEntry/KEGG_KOEntry_abund.txt',
+                 load_kegg: bool = False):   
         """
         初始化数据集
         
@@ -18,15 +20,20 @@ class BioSmokeDataset:
             sample_file: 包含样本信息的Excel文件路径
             taxonomy_file: 宏基因组数据文件路径
             metabolomics_file: 代谢组数据文件路径
+            kegg_file: KEGG KO丰度数据文件路径
+            load_kegg: 是否读取KEGG数据（默认False）
         """
         self.sample_file = sample_file
         self.taxonomy_file = taxonomy_file
         self.metabolomics_file = metabolomics_file
+        self.kegg_file = kegg_file
+        self.load_kegg = load_kegg
         
         # 存储数据
         self.sample_ids: List[str] = []
         self.taxonomy_data: Optional[pd.DataFrame] = None
         self.metabolomics_data: Optional[pd.DataFrame] = None
+        self.kegg_data: Optional[pd.DataFrame] = None
         self.smoking_labels: Dict[str, int] = {}
         self.gender_labels: Dict[str, int] = {}
         self.tnm_labels: Dict[str, int] = {}
@@ -41,6 +48,8 @@ class BioSmokeDataset:
         self._load_sample_ids()
         self._load_taxonomy_data()
         self._load_metabolomics_data()
+        if self.load_kegg:
+            self._load_kegg_data()
         self._extract_smoking_labels()
         self._extract_gender_labels()
         self._extract_tnm_labels()
@@ -259,6 +268,86 @@ class BioSmokeDataset:
             self.metabolomics_data = meta_data
         
         print(f"代谢组数据预处理完成: {original_shape} -> {self.metabolomics_data.shape}\n")
+
+    def preprocess_kegg_data(self, remove_low_expression: bool = True,
+                             min_abund_threshold: float = 0.01,
+                             min_prevalence_threshold: float = 0.1,
+                             remove_outliers: bool = False,
+                             outlier_method: str = 'iqr',
+                             outlier_threshold: float = 3.0,
+                             relative_abund: bool = True,
+                             transform: bool = False,
+                             transform_method: str = 'log') -> None:
+        """预处理KEGG KO丰度数据"""
+        if self.kegg_data is None:
+            return
+
+        print("\n预处理KEGG KO丰度数据...")
+        original_shape = self.kegg_data.shape
+
+        ko_col = self.kegg_data.columns[0]
+        self.kegg_data = self.kegg_data.drop_duplicates(subset=[ko_col], keep='first')
+        sample_cols = self.kegg_data.columns[1:]
+
+        if remove_low_expression:
+            self.kegg_data[sample_cols] = self.kegg_data[sample_cols].apply(pd.to_numeric, errors='coerce')
+
+            expression_counts = (self.kegg_data[sample_cols] > min_abund_threshold).sum(axis=1)
+            self.kegg_data = self.kegg_data[expression_counts >= min_prevalence_threshold * len(sample_cols)]
+
+            print(f"去除低表达KO: 保留 {self.kegg_data.shape[0]} 个KO")
+
+        if remove_outliers:
+            sample_cols = self.kegg_data.columns[1:]
+            self.kegg_data[sample_cols] = self.kegg_data[sample_cols].apply(pd.to_numeric, errors='coerce')
+            outlier_count = 0
+
+            if outlier_method == 'iqr':
+                for col in sample_cols:
+                    Q1 = self.kegg_data[col].quantile(0.25)
+                    Q3 = self.kegg_data[col].quantile(0.75)
+                    IQR = Q3 - Q1
+                    lower_bound = Q1 - outlier_threshold * IQR
+                    upper_bound = Q3 + outlier_threshold * IQR
+
+                    outliers = (self.kegg_data[col] < lower_bound) | (self.kegg_data[col] > upper_bound)
+                    self.kegg_data.loc[outliers, col] = self.kegg_data.loc[outliers, col].clip(lower_bound, upper_bound)
+                    outlier_count += outliers.sum()
+
+            elif outlier_method == 'zscore':
+                for col in sample_cols:
+                    z_scores = np.abs(stats.zscore(self.kegg_data[col], nan_policy='omit'))
+                    outliers = z_scores > outlier_threshold
+
+                    median_val = self.kegg_data[col].median()
+                    self.kegg_data.loc[outliers, col] = median_val
+                    outlier_count += outliers.sum()
+
+            print(f"去除异常值 ({outlier_method}方法): 处理了 {outlier_count} 个异常值")
+
+        if relative_abund:
+            self.kegg_data[sample_cols] = self.kegg_data[sample_cols].apply(pd.to_numeric, errors='coerce')
+            col_sums = self.kegg_data[sample_cols].sum(axis=0)
+            col_sums = col_sums.replace(0, 1)
+            self.kegg_data[sample_cols] = self.kegg_data[sample_cols].div(col_sums, axis=1) * 100
+            print("KEGG数据归一化 (相对丰度转换)")
+
+        if transform:
+            sample_cols = self.kegg_data.columns[1:]
+            self.kegg_data[sample_cols] = self.kegg_data[sample_cols].apply(pd.to_numeric, errors='coerce')
+
+            if transform_method == 'clr':
+                pseudo_count = 1e-9
+                clipped = self.kegg_data[sample_cols].clip(lower=0)
+                logged = np.log(clipped + pseudo_count)
+                self.kegg_data[sample_cols] = logged.sub(logged.mean(axis=0), axis=1)
+                print("KEGG数据变换 (CLR)")
+
+            elif transform_method == 'log':
+                self.kegg_data[sample_cols] = np.log1p(self.kegg_data[sample_cols].clip(lower=0))
+                print("KEGG数据变换 (log1p)")
+
+        print(f"KEGG数据预处理完成: {original_shape} -> {self.kegg_data.shape}\n")
         
     def _load_sample_ids(self) -> None:
         """从Excel文件加载样本ID"""
@@ -339,6 +428,18 @@ class BioSmokeDataset:
             
         except Exception as e:
             raise ValueError(f"加载代谢组数据失败: {e}")
+
+    def _load_kegg_data(self) -> None:
+        """加载KEGG KO丰度数据"""
+        try:
+            self.kegg_data = pd.read_csv(self.kegg_file, sep='\t')
+
+            self.kegg_data.columns = self.kegg_data.columns.str.strip()
+
+            print(f"KEGG数据形状: {self.kegg_data.shape}")
+
+        except Exception as e:
+            raise ValueError(f"加载KEGG数据失败: {e}")
     
     def _extract_smoking_labels(self) -> None:
         """提取吸烟标签"""
@@ -641,7 +742,19 @@ class BioSmokeDataset:
         meta_t.columns = [f"met_{c}" for c in meta_t.columns]
 
         # 按样本ID合并（外连接），保持标签尽可能完整
-        merged = pd.concat([tax_t, meta_t], axis=1, join='outer')
+        merge_parts = [tax_t, meta_t]
+        if self.kegg_data is not None:
+            # 处理KEGG数据：KO列为索引并转置
+            kegg_df = self.kegg_data.copy()
+            ko_col = kegg_df.columns[0]
+            kegg_df[ko_col] = kegg_df[ko_col].astype(str).str.strip()
+            kegg_t = kegg_df.set_index(ko_col).T
+            kegg_t.index = kegg_t.index.astype(str).str.strip()
+            kegg_t.index.name = 'SAMPLE_ID'
+            kegg_t.columns = [f"kegg_{c}" for c in kegg_t.columns]
+            merge_parts.append(kegg_t)
+
+        merged = pd.concat(merge_parts, axis=1, join='outer')
 
         # 如果 sample_ids 存在且在 merged 中，按 sample_ids 顺序排列
         ordered_idx = [str(s).strip() for s in self.sample_ids if str(s).strip() in merged.index]
@@ -730,6 +843,16 @@ class BioSmokeDataset:
 
         # 按样本ID合并（内连接），只保留两者都有的样本
         merged = pd.merge(tax_t, meta_t, left_index=True, right_index=True, how='inner')
+        if self.kegg_data is not None:
+            # 处理KEGG数据：KO列为索引并转置
+            kegg_df = self.kegg_data.copy()
+            ko_col = kegg_df.columns[0]
+            kegg_df[ko_col] = kegg_df[ko_col].astype(str).str.strip()
+            kegg_t = kegg_df.set_index(ko_col).T
+            kegg_t.index = kegg_t.index.astype(str).str.strip()
+            kegg_t.index.name = 'SAMPLE_ID'
+            kegg_t.columns = [f"kegg_{c}" for c in kegg_t.columns]
+            merged = pd.merge(merged, kegg_t, left_index=True, right_index=True, how='inner')
 
         # 如果 sample_ids 存在且在 merged 中，按 sample_ids 顺序排列
         ordered_idx = [str(s).strip() for s in self.sample_ids if str(s).strip() in merged.index]
@@ -789,8 +912,10 @@ class BioSmokeDataset:
 
 if __name__ == '__main__':
     # 加载数据
-    ds = BioSmokeDataset()
+    ds = BioSmokeDataset(load_kegg=True)
     ds.preprocess_taxonomy_data()
     ds.preprocess_metabolomics_data()
+    if ds.kegg_data is not None:
+        ds.preprocess_kegg_data()
     merged = ds.merge_to_dataframe()
     merged = ds.intersection_to_dataframe()

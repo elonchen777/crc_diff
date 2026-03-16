@@ -11,6 +11,8 @@ library(stringr)
 sample_file <- 'dataset/id_sample.xlsx'
 taxonomy_file <- 'dataset/taxonomy_Species_abund.txt'
 metabolomics_file <- 'dataset/metabolome_data.csv'
+kegg_file <- 'dataset/KEGG/4_KOEntry/KEGG_KOEntry_abund.txt'
+load_kegg <- TRUE
 
 # 1. 从Excel文件加载样本ID
 load_sample_ids <- function() {
@@ -52,9 +54,23 @@ load_taxonomy_data <- function() {
     
     # 去除列名中的空格
     colnames(taxonomy_data) <- trimws(colnames(taxonomy_data))
-    
-    # 去除unclassified
+
+    # 加载时去重：按第一列ID去空并去重（保留第一条）
     species_col <- colnames(taxonomy_data)[1]
+    taxonomy_data[[species_col]] <- trimws(as.character(taxonomy_data[[species_col]]))
+    non_empty <- !is.na(taxonomy_data[[species_col]]) & taxonomy_data[[species_col]] != ""
+    dropped_empty <- sum(!non_empty)
+    if (dropped_empty > 0) {
+      cat(sprintf("加载阶段去除空物种ID: %d 条\n", dropped_empty))
+    }
+    taxonomy_data <- taxonomy_data[non_empty, , drop = FALSE]
+    dup_rows <- duplicated(taxonomy_data[[species_col]])
+    if (sum(dup_rows) > 0) {
+      cat(sprintf("加载阶段去除重复物种ID: %d 条\n", sum(dup_rows)))
+      taxonomy_data <- taxonomy_data[!dup_rows, , drop = FALSE]
+    }
+
+    # 去除unclassified
     taxonomy_data <- taxonomy_data[!grepl('unclassified', taxonomy_data[[species_col]]), ]
     taxonomy_data <- taxonomy_data[!grepl('_sp', taxonomy_data[[species_col]]), ]
     taxonomy_data <- taxonomy_data[!grepl('\\[',  taxonomy_data[[species_col]]), ]
@@ -82,6 +98,40 @@ load_metabolomics_data <- function() {
     
     # 去除列名中的空格
     colnames(metabolomics_data) <- trimws(colnames(metabolomics_data))
+
+    # 加载时去重：跳过首行标签后按第一列ID去空并去重（保留第一条）
+    metab_col <- colnames(metabolomics_data)[1]
+    start_idx <- 1
+    if (nrow(metabolomics_data) >= 1) {
+      first_cell <- tolower(trimws(as.character(metabolomics_data[1, metab_col])))
+      if (!is.na(first_cell) && first_cell %in% c("lable", "label")) {
+        start_idx <- 2
+      }
+    }
+
+    if (nrow(metabolomics_data) >= start_idx) {
+      body_df <- metabolomics_data[start_idx:nrow(metabolomics_data), , drop = FALSE]
+      body_df[[metab_col]] <- trimws(as.character(body_df[[metab_col]]))
+
+      non_empty <- !is.na(body_df[[metab_col]]) & body_df[[metab_col]] != ""
+      dropped_empty <- sum(!non_empty)
+      if (dropped_empty > 0) {
+        cat(sprintf("加载阶段去除空代谢物ID: %d 条\n", dropped_empty))
+      }
+      body_df <- body_df[non_empty, , drop = FALSE]
+
+      dup_rows <- duplicated(body_df[[metab_col]])
+      if (sum(dup_rows) > 0) {
+        cat(sprintf("加载阶段去除重复代谢物ID: %d 条\n", sum(dup_rows)))
+        body_df <- body_df[!dup_rows, , drop = FALSE]
+      }
+
+      if (start_idx == 2) {
+        metabolomics_data <- rbind(metabolomics_data[1, , drop = FALSE], body_df)
+      } else {
+        metabolomics_data <- body_df
+      }
+    }
     
     cat(sprintf("代谢组数据形状: %d行 x %d列\n", 
                 nrow(metabolomics_data), ncol(metabolomics_data)))
@@ -96,6 +146,40 @@ load_metabolomics_data <- function() {
     
   }, error = function(e) {
     stop(paste("加载代谢组数据失败:", e$message))
+  })
+}
+
+# 3.1 加载KEGG KO丰度数据
+load_kegg_data <- function() {
+  cat("加载KEGG KO丰度数据...\n")
+
+  tryCatch({
+    kegg_data <- read.delim(kegg_file, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE)
+
+    colnames(kegg_data) <- trimws(colnames(kegg_data))
+
+    # 加载时去重：按第一列KO ID去空并去重（保留第一条）
+    ko_col <- colnames(kegg_data)[1]
+    kegg_data[[ko_col]] <- trimws(as.character(kegg_data[[ko_col]]))
+    non_empty <- !is.na(kegg_data[[ko_col]]) & kegg_data[[ko_col]] != ""
+    dropped_empty <- sum(!non_empty)
+    if (dropped_empty > 0) {
+      cat(sprintf("加载阶段去除空KO ID: %d 条\n", dropped_empty))
+    }
+    kegg_data <- kegg_data[non_empty, , drop = FALSE]
+
+    dup_rows <- duplicated(kegg_data[[ko_col]])
+    if (sum(dup_rows) > 0) {
+      cat(sprintf("加载阶段去除重复KO ID: %d 条\n", sum(dup_rows)))
+      kegg_data <- kegg_data[!dup_rows, , drop = FALSE]
+    }
+
+    cat(sprintf("KEGG数据形状: %d行 x %d列\n", nrow(kegg_data), ncol(kegg_data)))
+
+    return(kegg_data)
+
+  }, error = function(e) {
+    stop(paste("加载KEGG数据失败:", e$message))
   })
 }
 
@@ -483,38 +567,72 @@ extract_differentiation_labels <- function(df_patients, df_controls) {
 merge_to_dataframe <- function(taxonomy_data, metabolomics_data, 
                                df_patients, df_controls, sample_ids,
                                smoking_labels, gender_labels, age_labels, tnm_labels,
-                               differentiation_labels) {
+                               differentiation_labels,
+                               kegg_data = NULL) {
   cat("合并数据...\n")
-  
-  # 处理宏基因组数据：Species列为索引，转置为样本为行
-  tax_df <- taxonomy_data
-  species_col <- colnames(tax_df)[1]
-  
-  # 设置物种名为行名并转置
-  rownames(tax_df) <- tax_df[[species_col]]
-  tax_df[[species_col]] <- NULL
-  tax_t <- as.data.frame(t(tax_df))
-  colnames(tax_t) <- paste0("tax_", colnames(tax_t))
-  tax_t$SAMPLE_ID <- rownames(tax_t)
-  
-  # 处理代谢组数据
-  meta <- metabolomics_data
-  
-  # 检查第一行是否为标签行
-  if (!is.na(meta[1, 1]) && grepl("label", tolower(meta[1, 1]))) {
-    meta <- meta[-1, ]  # 跳过标签行
+
+  build_feature_table <- function(df, prefix, skip_label_row = FALSE) {
+    if (is.null(df) || nrow(df) == 0 || ncol(df) < 2) {
+      return(data.frame(SAMPLE_ID = character(), check.names = FALSE))
+    }
+
+    feature_df <- df
+    id_col <- colnames(feature_df)[1]
+
+    if (skip_label_row && nrow(feature_df) >= 1) {
+      first_id <- tolower(trimws(as.character(feature_df[[id_col]][1])))
+      if (!is.na(first_id) && first_id %in% c("label", "lable")) {
+        feature_df <- feature_df[-1, , drop = FALSE]
+      }
+    }
+
+    feature_ids <- trimws(as.character(feature_df[[id_col]]))
+    keep_non_empty <- !is.na(feature_ids) & feature_ids != ""
+    dropped_empty <- sum(!keep_non_empty)
+    if (dropped_empty > 0) {
+      cat(sprintf("警告: %s 首列存在 %d 个缺失/空ID，已跳过\n", prefix, dropped_empty))
+    }
+    feature_df <- feature_df[keep_non_empty, , drop = FALSE]
+    feature_ids <- feature_ids[keep_non_empty]
+
+    if (nrow(feature_df) == 0) {
+      return(data.frame(SAMPLE_ID = character(), check.names = FALSE))
+    }
+
+    dup_rows <- duplicated(feature_ids)
+    if (sum(dup_rows) > 0) {
+      cat(sprintf("警告: %s 首列存在 %d 个重复ID，已保留第一个\n", prefix, sum(dup_rows)))
+      feature_df <- feature_df[!dup_rows, , drop = FALSE]
+      feature_ids <- feature_ids[!dup_rows]
+    }
+
+    rownames(feature_df) <- make.unique(feature_ids)
+    feature_df[[id_col]] <- NULL
+
+    # 统一转为数值；无法转换的值记为NA，后续会填充为0
+    feature_df[] <- lapply(feature_df, function(x) suppressWarnings(as.numeric(x)))
+
+    feature_t <- as.data.frame(t(as.matrix(feature_df)), stringsAsFactors = FALSE, check.names = FALSE)
+    colnames(feature_t) <- paste0(prefix, "_", colnames(feature_t))
+    feature_t$SAMPLE_ID <- rownames(feature_t)
+    return(feature_t)
   }
   
-  # 设置代谢物名为行名并转置
-  metab_col <- colnames(meta)[1]
-  rownames(meta) <- meta[[metab_col]]
-  meta[[metab_col]] <- NULL
-  meta_t <- as.data.frame(t(meta))
-  colnames(meta_t) <- paste0("met_", colnames(meta_t))
-  meta_t$SAMPLE_ID <- rownames(meta_t)
+  # 处理宏基因组数据：Species列为索引，转置为样本为行
+  tax_t <- build_feature_table(taxonomy_data, "tax", skip_label_row = FALSE)
+  
+  # 处理代谢组数据
+  meta_t <- build_feature_table(metabolomics_data, "met", skip_label_row = TRUE)
   
   # 按样本ID合并（外连接）
   merged <- full_join(tax_t, meta_t, by = "SAMPLE_ID")
+
+  # 可选：合并KEGG数据
+  if (!is.null(kegg_data)) {
+    kegg_t <- build_feature_table(kegg_data, "kegg", skip_label_row = FALSE)
+
+    merged <- full_join(merged, kegg_t, by = "SAMPLE_ID")
+  }
   
   # 如果sample_ids存在，按顺序排列
   if (length(sample_ids) > 0) {
@@ -627,7 +745,7 @@ preprocess_taxonomy_data <- function(df,
     outlier_count <- 0
     
     for (i in 1:nrow(df)) {
-      row_data <- as.numeric(df[i, sample_cols])
+      row_data <- suppressWarnings(as.numeric(df[i, sample_cols]))
       
       if (outlier_method == "iqr") {
         Q1 <- quantile(row_data, 0.25, na.rm = TRUE)
@@ -733,7 +851,7 @@ preprocess_metabolomics_data <- function(df,
     outlier_count <- 0
     
     for (i in 1:nrow(df)) {
-      row_data <- as.numeric(df[i, sample_cols])
+      row_data <- suppressWarnings(as.numeric(df[i, sample_cols]))
       
       if (outlier_method == "iqr") {
         Q1 <- quantile(row_data, 0.25, na.rm = TRUE)
@@ -800,6 +918,111 @@ preprocess_metabolomics_data <- function(df,
   return(df)
 }
 
+# 11. 预处理KEGG数据
+# 输入数据格式: 行为KO, 列为样本, 第一列为KO名称
+preprocess_kegg_data <- function(df,
+                                 remove_duplicates = TRUE,
+                                 remove_low_expression = TRUE,
+                                 expression_threshold = 0.01,
+                                 prevalence_threshold = 0.1,
+                                 remove_outliers = FALSE,
+                                 outlier_method = "iqr",
+                                 outlier_threshold = 3.0,
+                                 relative_expression = TRUE,
+                                 transform = FALSE,
+                                 transform_method = "log") {
+  cat("\n预处理KEGG数据...\n")
+  original_shape <- c(nrow(df), ncol(df))
+  cat(sprintf("原始数据形状: %d行(KO) x %d列(样本)\n", original_shape[1], original_shape[2]))
+
+  id_col <- colnames(df)[1]
+  sample_cols <- colnames(df)[-1]
+  n_samples <- length(sample_cols)
+
+  if (remove_duplicates && nrow(df) > 0) {
+    dup_rows <- duplicated(df[[id_col]])
+    if (sum(dup_rows) > 0) {
+      cat(sprintf("发现重复KO: %d 个\n", sum(dup_rows)))
+      df <- df[!dup_rows, ]
+    }
+  }
+
+  if (remove_low_expression && length(sample_cols) > 0) {
+    expression_counts <- rowSums(df[, sample_cols, drop = FALSE] > expression_threshold, na.rm = TRUE)
+    prevalence <- expression_counts / n_samples
+    kept_rows <- prevalence >= prevalence_threshold
+    df <- df[kept_rows, , drop = FALSE]
+
+    cat(sprintf("过滤低流行度KO后保留: %d 个KO (流行度阈值: %.1f%%)\n", nrow(df), prevalence_threshold * 100))
+  }
+
+  if (remove_outliers && nrow(df) > 0 && length(sample_cols) > 0) {
+    outlier_count <- 0
+
+    for (i in 1:nrow(df)) {
+      row_data <- suppressWarnings(as.numeric(df[i, sample_cols]))
+
+      if (outlier_method == "iqr") {
+        Q1 <- quantile(row_data, 0.25, na.rm = TRUE)
+        Q3 <- quantile(row_data, 0.75, na.rm = TRUE)
+        IQR <- Q3 - Q1
+        lower_bound <- Q1 - outlier_threshold * IQR
+        upper_bound <- Q3 + outlier_threshold * IQR
+
+        outliers <- !is.na(row_data) & (row_data < lower_bound | row_data > upper_bound)
+        df[i, sample_cols][outliers] <- pmax(pmin(row_data[outliers], upper_bound), lower_bound)
+        outlier_count <- outlier_count + sum(outliers, na.rm = TRUE)
+
+      } else if (outlier_method == "zscore") {
+        z_scores <- abs((row_data - mean(row_data, na.rm = TRUE)) / sd(row_data, na.rm = TRUE))
+        outliers <- !is.na(z_scores) & z_scores > outlier_threshold
+        median_val <- median(row_data, na.rm = TRUE)
+        df[i, sample_cols][outliers] <- median_val
+        outlier_count <- outlier_count + sum(outliers, na.rm = TRUE)
+      }
+    }
+
+    cat(sprintf("去除异常值 (%s方法): 处理了 %d 个异常值\n", outlier_method, outlier_count))
+  }
+
+  if (nrow(df) > 0 && length(sample_cols) > 0) {
+    feature_df <- df[, sample_cols, drop = FALSE]
+
+    if (relative_expression) {
+      col_sums <- colSums(feature_df, na.rm = TRUE)
+      col_sums[col_sums == 0] <- 1
+      feature_df <- as.data.frame(mapply(function(x, s) x / s * 100, feature_df, col_sums))
+      cat("KEGG数据转换为相对丰度\n")
+    }
+
+    if (transform && transform_method == "log") {
+      feature_df <- log1p(feature_df)
+      cat("KEGG数据变换 (log)\n")
+    }
+
+    if (transform && transform_method == "log2") {
+      feature_df <- log2(feature_df + 1e-6)
+      cat("KEGG数据变换 (log2)\n")
+    }
+
+    if (transform && transform_method == "clr") {
+      feature_matrix <- as.matrix(feature_df)
+      feature_matrix[feature_matrix <= 0] <- 0.5 * min(feature_matrix[feature_matrix > 0], na.rm = TRUE)
+      clr_result <- log(feature_matrix / exp(rowMeans(log(feature_matrix), na.rm = TRUE)))
+      feature_df <- as.data.frame(clr_result)
+      cat("KEGG数据变换 (CLR)\n")
+    }
+
+    df[, sample_cols] <- feature_df
+  }
+
+  final_shape <- c(nrow(df), ncol(df))
+  cat(sprintf("KEGG数据预处理完成: (%d, %d) -> (%d, %d)\n",
+              original_shape[1], original_shape[2], final_shape[1], final_shape[2]))
+
+  return(df)
+}
+
 # 主程序
 cat("开始数据处理流程...\n\n")
 
@@ -814,6 +1037,12 @@ taxonomy_data <- load_taxonomy_data()
 
 # 步骤3：加载代谢组数据
 metabolomics_data <- load_metabolomics_data()
+
+# 步骤3.1：按开关加载KEGG数据（默认关闭）
+kegg_data <- NULL
+if (isTRUE(load_kegg)) {
+  kegg_data <- load_kegg_data()
+}
 
 # 步骤4：提取吸烟标签
 smoking_labels <- extract_smoking_labels(df_patients, df_controls)
@@ -835,6 +1064,12 @@ taxonomy_data_relative <- preprocess_taxonomy_data(taxonomy_data)
 
 # 步骤10：预处理代谢组数据
 metabolomics_data_relative <- preprocess_metabolomics_data(metabolomics_data)
+
+# 步骤10.1：预处理KEGG数据（可选）
+kegg_data_relative <- NULL
+if (!is.null(kegg_data)) {
+  kegg_data_relative <- preprocess_kegg_data(kegg_data)
+}
 
 # 步骤9：预处理数据
 taxonomy_data_log <- preprocess_taxonomy_data(taxonomy_data,
@@ -863,21 +1098,39 @@ metabolomics_data_log <- preprocess_metabolomics_data(metabolomics_data,
                                                       transform_method = "log",
                                                       scale = FALSE)
 
+kegg_data_log <- NULL
+if (!is.null(kegg_data)) {
+  kegg_data_log <- preprocess_kegg_data(kegg_data,
+                                        remove_duplicates = TRUE,
+                                        remove_low_expression = TRUE,
+                                        expression_threshold = 0.01,
+                                        prevalence_threshold = 0.1,
+                                        remove_outliers = FALSE,
+                                        outlier_method = "iqr",
+                                        outlier_threshold = 3.0,
+                                        relative_expression = TRUE,
+                                        transform = TRUE,
+                                        transform_method = "log")
+}
+
 # 步骤8：合并数据
 merged_data_raw <- merge_to_dataframe(taxonomy_data, metabolomics_data,
                                   df_patients, df_controls, sample_ids,
                                   smoking_labels, gender_labels, age_labels, tnm_labels,
-                                  differentiation_labels)
+                                  differentiation_labels,
+                                  kegg_data = kegg_data)
 
 merged_data_relative <- merge_to_dataframe(taxonomy_data_relative, metabolomics_data_relative,
                                   df_patients, df_controls, sample_ids,
                                   smoking_labels, gender_labels, age_labels, tnm_labels,
-                                  differentiation_labels)
+                                  differentiation_labels,
+                                  kegg_data = kegg_data_relative)
 
 merged_data_processed <- merge_to_dataframe(taxonomy_data_log, metabolomics_data_log,
                                   df_patients, df_controls, sample_ids,
                                   smoking_labels, gender_labels, age_labels, tnm_labels,
-                                  differentiation_labels)
+                                  differentiation_labels,
+                                  kegg_data = kegg_data_log)
 
 # 显示结果
 cat("\n数据处理完成！\n")

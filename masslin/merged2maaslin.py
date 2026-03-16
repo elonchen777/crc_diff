@@ -5,6 +5,7 @@ Convert `merged_dataset.csv` into two TSVs usable by MaAsLin2/MaAsLin3 (features
 
 Produces:
 - dataset/maaslin_features.tsv  (samples x features)
+- dataset/maaslin_ko_features.tsv  (samples x KO features)
 - dataset/maaslin_metadata.tsv  (samples x covariates)
 
 Usage:
@@ -101,6 +102,10 @@ def main():
     # 提取分类学特征列 (tax_ 开头的列)
     taxonomy_cols = [c for c in df.columns if c.startswith('tax_')]
     print(f"\n找到 {len(taxonomy_cols)} 个分类学特征")
+
+    # 提取KO特征列 (kegg_ 开头的列)
+    ko_cols = [c for c in df.columns if c.startswith('kegg_')]
+    print(f"找到 {len(ko_cols)} 个KO特征")
     
     if len(taxonomy_cols) == 0:
         print("错误: 未找到 tax_ 开头的分类学特征列", file=sys.stderr)
@@ -151,9 +156,28 @@ def main():
     
     features_df = features_df.loc[common_samples]
     metadata_df = metadata_df.loc[common_samples]
+
+    # 准备KO特征矩阵 (samples x KO features)
+    ko_features_df = None
+    if len(ko_cols) > 0:
+        ko_features_df = df[['SAMPLE_ID'] + ko_cols].copy()
+        ko_features_df.columns = ['SAMPLE_ID'] + _clean_names(ko_cols)
+        ko_features_df = ko_features_df.set_index('SAMPLE_ID')
+
+        # 转换为数值并移除全零特征
+        ko_features_df = ko_features_df.apply(pd.to_numeric, errors='coerce').fillna(0)
+        nonzero_ko_features = ko_features_df.columns[ko_features_df.sum() > 0]
+        ko_features_df = ko_features_df[nonzero_ko_features]
+        print(f"移除全零KO特征后: {ko_features_df.shape[1]} 个特征")
+
+        ko_features_df.index = ko_features_df.index.astype(str)
+        ko_features_df = ko_features_df.loc[ko_features_df.index.intersection(metadata_df.index)]
+        ko_features_df = ko_features_df.loc[metadata_df.index.intersection(ko_features_df.index)]
+        ko_features_df.index.name = 'SAMPLE_ID'
     
     # 写入输出文件
     feat_out = outdir / "maaslin_features.tsv"
+    ko_feat_out = outdir / "maaslin_ko_features.tsv"
     meta_out = outdir / "maaslin_metadata.tsv"
     
     # 确保索引标签兼容 R 的 read.table(row.names=1)
@@ -162,9 +186,15 @@ def main():
     
     features_df.to_csv(feat_out, sep="\t", index=True, index_label='SAMPLE_ID', na_rep='')
     metadata_df.to_csv(meta_out, sep="\t", index=True, index_label='SAMPLE_ID', na_rep='')
+    if ko_features_df is not None:
+        ko_features_df.to_csv(ko_feat_out, sep="\t", index=True, index_label='SAMPLE_ID', na_rep='')
     
     print(f"\n输出文件:")
     print(f"  Features: {feat_out} (samples x features: {features_df.shape})")
+    if ko_features_df is not None:
+        print(f"  KO Features: {ko_feat_out} (samples x KO features: {ko_features_df.shape})")
+    else:
+        print(f"  KO Features: 未导出（未找到 kegg_ 开头特征列）")
     print(f"  Metadata: {meta_out} (samples x covariates: {metadata_df.shape})")
     
     # 打印分组信息供参考
