@@ -563,6 +563,7 @@ def plot_single_volcano(volcano_df: pd.DataFrame, vip_scores: np.ndarray, featur
 def main():
     # 加载数据
     ds = BioSmokeDataset()
+    ds.preprocess_metabolomics_data(pqn_normalization=True, transform=True, transform_method='log')
     merged = ds.merge_to_dataframe()
     
     print(f"总样本数: {merged.shape[0]}")

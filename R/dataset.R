@@ -819,6 +819,7 @@ preprocess_metabolomics_data <- function(df,
                                          outlier_method = "iqr",
                                          outlier_threshold = 3.0,
                                          relative_expression = FALSE,
+                                         pqn_normalization = TRUE,
                                          transform = FALSE,
                                          transform_method = "log",
                                          scale = FALSE) {
@@ -893,6 +894,25 @@ preprocess_metabolomics_data <- function(df,
       cat("代谢组数据转换为相对丰度\n")
 
     }
+
+    if (pqn_normalization) {
+      # 1. 计算参考样本（所有样本的中位数）
+      reference_sample <- apply(feature_df, 1, median, na.rm = TRUE)
+      # 避免除以 0
+      reference_sample[reference_sample <= 0] <- min(reference_sample[reference_sample > 0], na.rm = TRUE)
+      
+      # 2. 计算每个样本相对于参考样本的比率
+      quotients <- feature_df / reference_sample
+      
+      # 3. 计算每个样本比率的中位数（稀释因子）
+      dilution_factors <- apply(quotients, 2, median, na.rm = TRUE)
+      dilution_factors[dilution_factors <= 0] <- 1 # 防止除以 0
+      
+      # 4. 用稀释因子对原始数据进行归一化
+      feature_df <- as.data.frame(sweep(feature_df, 2, dilution_factors, "/"))
+      cat("代谢组数据完成 PQN 归一化\n")
+    }
+
     if (transform && transform_method == "log") {
       feature_df <- log1p(feature_df)
       cat("代谢组数据变换 (log)\n")

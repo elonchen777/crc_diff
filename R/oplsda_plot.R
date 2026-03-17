@@ -21,7 +21,7 @@ theme_microbiome <- function() {
 }
 
 cat("读取合并后的数据...\n")
-merged_data <- fread("dataset/merged_dataset_relative.csv", stringsAsFactors = FALSE, data.table = FALSE)
+merged_data <- fread("dataset/merged_dataset_processed.csv", stringsAsFactors = FALSE, data.table = FALSE)
 
 output_dir <- file.path("results", "R_plots", "oplsda_plot")
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
@@ -153,11 +153,8 @@ for (i in seq_along(comparison_groups)) {
         x = metab_matrix,
         y = current_data$group,
         predI = 1,
-        orthoI = 1,
-        permI = 200,
-        scaleC = "standard",
-        fig.pdfC = "none",
-        info.txtC = "none"
+        orthoI = NA,
+        permI = 100
       )
     },
     error = function(e) {
@@ -167,10 +164,7 @@ for (i in seq_along(comparison_groups)) {
         y = current_data$group,
         predI = 2,
         orthoI = 0,
-        permI = 200,
-        scaleC = "standard",
-        fig.pdfC = "none",
-        info.txtC = "none"
+        permI = 100
       )
     }
   )
@@ -207,13 +201,65 @@ for (i in seq_along(comparison_groups)) {
   }
 
   summary_df <- as.data.frame(ropls::getSummaryDF(model))
+
+  extract_r2x_percent <- function(summary_table, comp_name) {
+    r2x_cols <- grep("R2X", colnames(summary_table), ignore.case = TRUE, value = TRUE)
+    if (length(r2x_cols) == 0) return(NA_real_)
+
+    rn <- rownames(summary_table)
+    if (!is.null(rn) && length(rn) > 0) {
+      idx_exact <- which(tolower(rn) == tolower(comp_name))
+      idx_partial <- grep(paste0("(^|[^a-z0-9])", tolower(comp_name), "([^a-z0-9]|$)"), tolower(rn), perl = TRUE)
+      idx <- unique(c(idx_exact, idx_partial))
+      if (length(idx) > 0) {
+        vals <- suppressWarnings(as.numeric(unlist(summary_table[idx[1], r2x_cols, drop = TRUE])))
+        vals <- vals[!is.na(vals)]
+        if (length(vals) > 0) return(vals[1] * 100)
+      }
+    }
+
+    comp_col <- grep(comp_name, colnames(summary_table), ignore.case = TRUE, value = TRUE)
+    comp_col <- comp_col[grepl("R2X", comp_col, ignore.case = TRUE)]
+    if (length(comp_col) > 0) {
+      val <- suppressWarnings(as.numeric(summary_table[1, comp_col[1]]))
+      if (!is.na(val)) return(val * 100)
+    }
+
+    NA_real_
+  }
+
+  x_percent <- extract_r2x_percent(summary_df, "p1")
+  y_percent <- extract_r2x_percent(summary_df, "o1")
+  if (is.na(x_percent)) cat("未在 ropls 摘要中解析到 p1 对应 R2X 百分比，x 轴仅显示 p1\n")
+  if (is.na(y_percent)) cat("未在 ropls 摘要中解析到 o1 对应 R2X 正交分量百分比，y 轴仅显示 o1\n")
+  x_axis_label <- if (is.na(x_percent)) "p1" else sprintf("p1 (%.1f%%)", x_percent)
+  y_axis_label <- if (is.na(y_percent)) "o1" else sprintf("o1 (%.1f%%)", y_percent)
+
   r2y <- if ("R2Y(cum)" %in% colnames(summary_df)) summary_df[1, "R2Y(cum)"] else NA
   q2 <- if ("Q2(cum)" %in% colnames(summary_df)) summary_df[1, "Q2(cum)"] else NA
-  subtitle_text <- sprintf("R2Y(cum) = %.3f, Q2(cum) = %.3f", as.numeric(r2y), as.numeric(q2))
+  # 模型p值来自置换检验（permI = 1000），优先使用 pQ2，备选 pR2Y
+  p_value_model <- if ("pQ2" %in% colnames(summary_df)) {
+    as.numeric(summary_df[1, "pQ2"])
+  } else if ("pR2Y" %in% colnames(summary_df)) {
+    as.numeric(summary_df[1, "pR2Y"])
+  } else {
+    NA_real_
+  }
+  p_text <- if (is.na(p_value_model)) {
+    "NA"
+  } else if (p_value_model < 0.001) {
+    "<0.001"
+  } else {
+    sprintf("%.4f", p_value_model)
+  }
+  summary_df$p_value_model <- p_value_model
+  subtitle_text <- sprintf("p(model) = %s", p_text)
 
   active_levels <- c(group1, group2)
 
   p <- ggplot(score_df, aes(x = X, y = Y, color = group)) +
+    geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.6, color = "grey40") +
+    geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.6, color = "grey40") +
     geom_point(size = 3, alpha = 0.8) +
     stat_ellipse(level = 0.95, linetype = 1, linewidth = 1) +
     scale_color_manual(
@@ -224,8 +270,8 @@ for (i in seq_along(comparison_groups)) {
     labs(
       title = "OPLS-DA (Metabolites)",
       subtitle = subtitle_text,
-      x = paste0(x_comp, " score"),
-      y = paste0(y_comp, " score"),
+      x = x_axis_label,
+      y = y_axis_label,
       color = "Group"
     ) +
     theme_microbiome() +
@@ -254,6 +300,29 @@ for (i in seq_along(comparison_groups)) {
     vip_out <- file.path(output_dir, paste0("oplsda_metabolites_", comparison_name, "_vip.csv"))
     write.csv(vip_df, vip_out, row.names = FALSE)
     cat(sprintf("VIP结果已保存: %s\n", vip_out))
+
+    vip_plot_df <- vip_df %>%
+      head(n = 20) %>%
+      mutate(metabolite_name = factor(metabolite_name, levels = rev(metabolite_name)))
+
+    vip_plot <- ggplot(vip_plot_df, aes(x = metabolite_name, y = VIP)) +
+      geom_col(fill = "#2E86AB", alpha = 0.9) +
+      geom_hline(yintercept = 1, linetype = "dashed", linewidth = 0.8, color = "#D7263D") +
+      coord_flip() +
+      labs(
+        title = paste0("VIP Top ", nrow(vip_plot_df), " (", group_labels[group1], " vs ", group_labels[group2], ")"),
+        x = "Metabolite",
+        y = "VIP"
+      ) +
+      theme_microbiome() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 13, face = "bold"),
+        axis.text.y = element_text(size = 10)
+      )
+
+    vip_plot_out <- file.path(output_dir, paste0("oplsda_metabolites_", comparison_name, "_vip_top20.png"))
+    ggsave(vip_plot_out, vip_plot, width = 8, height = 6, dpi = 300)
+    cat(sprintf("VIP可视化图已保存: %s\n", vip_plot_out))
   }
 
   summary_out <- file.path(output_dir, paste0("oplsda_metabolites_", comparison_name, "_model_summary.csv"))
@@ -266,6 +335,7 @@ for (i in seq_along(comparison_groups)) {
     n_features = ncol(metab_matrix),
     R2Y_cum = as.numeric(r2y),
     Q2_cum = as.numeric(q2),
+    p_value_model = p_value_model,
     stringsAsFactors = FALSE
   )
 }

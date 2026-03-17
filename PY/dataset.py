@@ -153,6 +153,7 @@ class BioSmokeDataset:
                                      outlier_method: str = 'iqr',
                                      outlier_threshold: float = 3.0,
                                      relative_abund: bool = False,
+                                     pqn_normalization: bool = True,
                                      transform: bool = False,
                                      transform_method: str = 'log',
                                      scale: bool = False) -> None:
@@ -162,7 +163,7 @@ class BioSmokeDataset:
             
         print("\n预处理代谢组数据...")
         
-        meta_data = self.metabolomics_data
+        meta_data = self.metabolomics_data.copy()
         if meta_data.shape[0] >= 1 and meta_data.shape[1] >= 1:
             first_cell = str(meta_data.iloc[0, 0]).strip()
             if first_cell.lower() in ('lable', 'label'):
@@ -225,6 +226,26 @@ class BioSmokeDataset:
             col_sums = col_sums.replace(0, 1)
             meta_data[sample_cols] = meta_data[sample_cols].div(col_sums, axis=1)*100
             print(f"代谢组数据归一化 (相对丰度转换)")
+
+        if pqn_normalization:
+            # 1. 确保数据为数值型
+            meta_data[sample_cols] = meta_data[sample_cols].apply(pd.to_numeric, errors='coerce')
+            # 2. 计算参考样本（所有样本的中位数）
+            reference_sample = meta_data[sample_cols].median(axis=1)
+            # 避免除以 0
+            min_pos = reference_sample[reference_sample > 0].min() if (reference_sample > 0).any() else 1e-6
+            reference_sample = reference_sample.replace(0, min_pos)
+            
+            # 3. 计算每个样本相对于参考样本的比率
+            quotients = meta_data[sample_cols].div(reference_sample, axis=0)
+            
+            # 4. 计算每个样本比率的中位数（稀释因子）
+            dilution_factors = quotients.median(axis=0)
+            dilution_factors = dilution_factors.replace(0, 1) # 防止除以 0
+            
+            # 5. 用稀释因子对原始数据进行归一化
+            meta_data[sample_cols] = meta_data[sample_cols].div(dilution_factors, axis=1)
+            print(f"代谢组数据归一化 (PQN)")
         
         if transform:
             sample_cols = meta_data.columns[1:]
