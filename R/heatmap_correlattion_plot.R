@@ -93,8 +93,8 @@ make_corr_heatmap <- function(group_name, title_label, col_title_color) {
 }
 
 ht_ctrl      <- make_corr_heatmap("control",       "Ctrl",       "#2E86AB")
-ht_well      <- make_corr_heatmap("CRC_well_diff", "CRC-Well", "#A23B72")
-ht_poor      <- make_corr_heatmap("CRC_poor_diff", "CRC-Poor", "#F18F01")
+ht_well      <- make_corr_heatmap("CRC_well_diff", "CRC-Well", "#F18F01")
+ht_poor      <- make_corr_heatmap("CRC_poor_diff", "CRC-Poor", "#D7263D")
 
 
 # 生成图例
