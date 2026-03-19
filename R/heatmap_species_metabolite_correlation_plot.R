@@ -122,10 +122,40 @@ simplify_species_name <- function(x) {
 species_labels <- vapply(species_cols, simplify_species_name, character(1))
 met_labels <- gsub("^met_", "", met_cols)
 
+get_control_met_order <- function() {
+  df_species <- merged_data[merged_data$group == "control", species_cols, drop = FALSE]
+  df_met <- merged_data[merged_data$group == "control", met_cols, drop = FALSE]
+
+  colnames(df_species) <- species_labels
+  colnames(df_met) <- met_labels
+
+  all_mat <- cbind(df_species, df_met)
+  rc <- rcorr(as.matrix(all_mat), type = "spearman")
+
+  n_sp <- ncol(df_species)
+  n_met <- ncol(df_met)
+  r_cross <- rc$r[1:n_sp, (n_sp + 1):(n_sp + n_met), drop = FALSE]
+
+  if (ncol(r_cross) <= 1) {
+    return(colnames(r_cross))
+  }
+
+  colnames(r_cross)[hclust(dist(t(r_cross)))$order]
+}
+
+ctrl_met_order <- get_control_met_order()
+
 message("Matched species columns: ", paste(species_cols, collapse = "; "))
 message("Matched metabolite columns: ", paste(met_cols, collapse = "; "))
 
-make_cross_corr_heatmap <- function(group_name, title_label, col_title_color) {
+make_cross_corr_heatmap <- function(
+  group_name,
+  title_label,
+  col_title_color,
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  column_order = NULL
+) {
   df_species <- merged_data[merged_data$group == group_name, species_cols, drop = FALSE]
   df_met <- merged_data[merged_data$group == group_name, met_cols, drop = FALSE]
 
@@ -172,8 +202,11 @@ make_cross_corr_heatmap <- function(group_name, title_label, col_title_color) {
     row_names_gp = gpar(fontsize = 9, fontface = "italic"),
     column_names_gp = gpar(fontsize = 8),
     column_names_rot = 45,
-    show_row_dend = TRUE,
-    show_column_dend = TRUE,
+    cluster_rows = cluster_rows,
+    cluster_columns = cluster_columns,
+    column_order = column_order,
+    show_row_dend = FALSE,
+    show_column_dend = FALSE,
     column_title = title_label,
     column_title_gp = gpar(fontsize = 12, fontface = "bold", col = col_title_color),
     width = unit(10, "cm"),
@@ -183,8 +216,22 @@ make_cross_corr_heatmap <- function(group_name, title_label, col_title_color) {
 }
 
 ht_ctrl <- make_cross_corr_heatmap("control", "Ctrl", "#2E86AB")
-ht_well <- make_cross_corr_heatmap("CRC_well_diff", "CRC-Well", "#F18F01")
-ht_poor <- make_cross_corr_heatmap("CRC_poor_diff", "CRC-Poor", "#D7263D")
+ht_well <- make_cross_corr_heatmap(
+  "CRC_well_diff",
+  "CRC-Well",
+  "#F18F01",
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  column_order = ctrl_met_order
+)
+ht_poor <- make_cross_corr_heatmap(
+  "CRC_poor_diff",
+  "CRC-Poor",
+  "#D7263D",
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  column_order = ctrl_met_order
+)
 
 lgd_sig <- Legend(
   labels = c("p <= 0.05", "p <= 0.01", "p <= 0.001"),
