@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
+from sklearn.metrics import accuracy_score, classification_report, roc_auc_score, roc_curve
 from sklearn.model_selection import train_test_split
 
 from random_forest_diff import CLASS_ORDER, clean_feature_name, load_analysis_data
@@ -73,7 +73,20 @@ def run_pairwise_random_forest(
     y_pred = forest.predict(x_test)
     y_proba = forest.predict_proba(x_test)
     accuracy = accuracy_score(y_test, y_pred)
-    auc = roc_auc_score(y_test, y_proba[:, 1])
+    auc_val = roc_auc_score(y_test == forest.classes_[1], y_proba[:, 1])
+
+    fpr, tpr, _ = roc_curve(y_test == forest.classes_[1], y_proba[:, 1])
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {auc_val:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title(f'Receiver Operating Characteristic - {pair_name}')
+    plt.legend(loc="lower right")
+    plt.savefig(pair_dir / 'roc_curve.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
     labels = list(forest.classes_)
     report = classification_report(y_test, y_pred, target_names=labels, digits=4, zero_division=0)
@@ -84,7 +97,7 @@ def run_pairwise_random_forest(
         f'Test samples: {len(x_test)}',
         f'Class counts: {y.value_counts().to_dict()}',
         f'Accuracy: {accuracy:.4f}',
-        f'ROC AUC: {auc:.4f}',
+        f'ROC AUC: {auc_val:.4f}',
         '',
         'Classification report:',
         report,
