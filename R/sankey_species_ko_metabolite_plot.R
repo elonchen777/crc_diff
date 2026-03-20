@@ -264,12 +264,22 @@ simplify_met <- function(x) {
 
 wrap_node_label <- function(x, type) {
   if (type == "KO") {
-    return(str_wrap(x, width = 22))
+    # 针对 KO，将 "Kxxxxx | PathwayName" 拆分为两行
+    if (grepl(" \\| ", x)) {
+      parts <- strsplit(x, " \\| ")[[1]]
+      ko_id <- parts[1]
+      pw_name <- parts[2]
+      # 对 pathway 名称进行换行处理，然后合并
+      wrapped_pw <- str_wrap(pw_name, width = 20)
+      return(paste0(ko_id, "\n", wrapped_pw))
+    }
+    return(str_wrap(x, width = 20))
   }
   if (type == "species") {
     return(str_wrap(x, width = 16))
   }
-  str_wrap(x, width = 18)
+  # 代谢物名称通常较长，缩窄宽度强制换行以留在节点内
+  str_wrap(x, width = 15, whitespace_only = FALSE)
 }
 
 build_node_fc_table <- function(dat, present_groups, species_cols, ko_cols_needed, met_cols, ko_labels) {
@@ -319,12 +329,37 @@ build_node_fc_table <- function(dat, present_groups, species_cols, ko_cols_neede
 
 ko_ids_needed <- sub("^kegg_", "", ko_cols_needed)
 ko_pathway_map <- load_ko_pathway_label(ko_ids_needed)
+ko_pathway_only <- nice_kegg_pathway(unname(ko_pathway_map[ko_ids_needed]))
 ko_labels <- paste0(
   ko_ids_needed,
   " | ",
-  nice_kegg_pathway(ko_pathway_map[ko_ids_needed])
+  ko_pathway_only
 )
 names(ko_labels) <- ko_cols_needed
+
+ko_pathway_by_id <- setNames(ko_pathway_only, ko_ids_needed)
+pathway_levels <- unique(ko_pathway_only)
+pathway_legend_levels <- unique(c(pathway_levels, "Unknown pathway"))
+
+ko_palette <- c(
+  K12688 = "#A61C3C",
+  K02548 = "#D96C06",
+  K07091 = "#E38F2D",
+  K10200 = "#2E6F95",
+  K10201 = "#4F9DA6",
+  K02114 = "#6CA6C1",
+  K01512 = "#4C956C",
+  K01647 = "#8AAE5D",
+  K02804 = "#7A5EA6",
+  K03785 = "#A85D8E"
+)
+
+pathway_palette <- setNames(unname(ko_palette[seq_along(pathway_levels)]), pathway_levels)
+
+species_levels <- vapply(FIXED_SPECIES_LIST, simplify_species, character(1))
+ko_levels <- unname(ko_labels[ko_cols_needed])
+met_levels <- vapply(FIXED_METABOLITES_LIST, simplify_met, character(1))
+node_order_levels <- c(species_levels, ko_levels, met_levels)
 
 node_fc_tbl <- build_node_fc_table(
   dat = dat,
@@ -563,6 +598,14 @@ triplets_lodes$type <- dplyr::case_when(
   TRUE ~ "metabolite"
 )
 
+triplets_lodes$stratum <- factor(triplets_lodes$stratum, levels = node_order_levels)
+triplets_lodes$pathway <- unname(ko_pathway_by_id[triplets_lodes$ko_id])
+triplets_lodes$pathway[is.na(triplets_lodes$pathway) | triplets_lodes$pathway == ""] <- "Unknown pathway"
+triplets_lodes$pathway <- factor(triplets_lodes$pathway, levels = pathway_legend_levels)
+present_pathways <- unique(as.character(triplets_lodes$pathway))
+present_pathways <- present_pathways[!is.na(present_pathways) & present_pathways != ""]
+present_pathways <- intersect(pathway_legend_levels, present_pathways)
+
 triplets_lodes$label <- mapply(function(s, t) wrap_node_label(as.character(s), as.character(t)), 
                                triplets_lodes$stratum, triplets_lodes$type, USE.NAMES = FALSE)
 triplets_lodes$fontface <- ifelse(triplets_lodes$type == "species", "italic", "plain")
@@ -574,31 +617,23 @@ triplets_lodes$log2_fc[is.na(triplets_lodes$log2_fc)] <- 0
 fc_lim <- max(abs(triplets_lodes$log2_fc), na.rm = TRUE)
 if (!is.finite(fc_lim) || fc_lim <= 0) fc_lim <- 1
 
-ko_palette <- c(
-  K12688 = "#A61C3C",
-  K02548 = "#D96C06",
-  K07091 = "#E38F2D",
-  K10200 = "#2E6F95",
-  K10201 = "#4F9DA6",
-  K02114 = "#6CA6C1",
-  K01512 = "#4C956C",
-  K01647 = "#8AAE5D",
-  K02804 = "#7A5EA6",
-  K03785 = "#A85D8E"
-)
-
 p <- ggplot(
   triplets_lodes,
   aes(
     x = axis,
     stratum = stratum,
     alluvium = flow_id,
-    y = value,
-    group = flow_id
+    y = value
   )
 ) +
-  geom_alluvium(aes(fill = ko_id), width = 0.12, alpha = 0.46, knot.pos = 0.35, decreasing = FALSE) +
-  scale_fill_manual(values = ko_palette, guide = "none") +
+  geom_alluvium(aes(fill = pathway), width = 0.12, alpha = 0.46, knot.pos = 0.35, decreasing = FALSE) +
+  scale_fill_manual(
+    values = c(pathway_palette, "Unknown pathway" = "#BDBDBD"),
+    breaks = present_pathways,
+    drop = TRUE,
+    name = "Pathway",
+    guide = guide_legend(override.aes = list(alpha = 0.9))
+  ) +
   ggnewscale::new_scale_fill() +
   geom_stratum(aes(fill = log2_fc), width = 0.12, color = "white", linewidth = 0.6, decreasing = FALSE) +
   scale_fill_gradient2(
@@ -608,11 +643,13 @@ p <- ggplot(
     midpoint = 0,
     limits = c(-fc_lim, fc_lim),
     oob = squish,
-    guide = "none"
+    name = "Node log2FC",
+    guide = guide_colourbar(barheight = unit(45, "mm"), barwidth = unit(4, "mm"))
   ) +
   geom_text(
     stat = "stratum",
     aes(label = label, fontface = fontface),
+    decreasing = FALSE,
     size = 2.2,
     family = "sans",
     lineheight = 0.9,
@@ -677,12 +714,17 @@ for (g in present_groups) {
       x = axis,
       stratum = stratum,
       alluvium = flow_id,
-      y = value,
-      group = flow_id
+      y = value
     )
   ) +
-    geom_alluvium(aes(fill = ko_id), width = 0.12, alpha = 0.46, knot.pos = 0.35, decreasing = FALSE) +
-    scale_fill_manual(values = ko_palette, guide = "none") +
+    geom_alluvium(aes(fill = pathway), width = 0.12, alpha = 0.46, knot.pos = 0.35, decreasing = FALSE) +
+    scale_fill_manual(
+      values = c(pathway_palette, "Unknown pathway" = "#BDBDBD"),
+      breaks = present_pathways,
+      drop = TRUE,
+      name = "Pathway",
+      guide = guide_legend(override.aes = list(alpha = 0.9))
+    ) +
     ggnewscale::new_scale_fill() +
     geom_stratum(aes(fill = log2_fc), width = 0.12, color = "white", linewidth = 0.6, decreasing = FALSE) +
     scale_fill_gradient2(
@@ -692,11 +734,13 @@ for (g in present_groups) {
       midpoint = 0,
       limits = c(-g_fc_lim, g_fc_lim),
       oob = squish,
-      guide = "none"
+      name = "Node log2FC",
+      guide = guide_colourbar(barheight = unit(45, "mm"), barwidth = unit(4, "mm"))
     ) +
     geom_text(
       stat = "stratum",
       aes(label = label, fontface = fontface),
+      decreasing = FALSE,
       size = 2.2,
       family = "sans",
       lineheight = 0.9,
