@@ -19,7 +19,7 @@ target_features <- c(
   "Peptostreptococcus_stomatis", "Porphyromonas_gingivalis",
   "Prevotella_intermedia",       "Fusobacterium_periodonticum",
   "Campylobacter_rectus",        "Faecalibacterium_prausnitzii",
-  "Roseburia_intestinalis",      "Eubacterium_rectale_CAG:36",
+  "Roseburia_intestinalis",      "Eubacterium_rectale",
   "Coprococcus_comes",           "Ruminococcus_lactaris"
 )
 

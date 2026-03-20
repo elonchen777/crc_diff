@@ -53,8 +53,7 @@ match_targets_to_cols <- function(target_list, available_cols, remove_prefix = "
   missing_targets <- character(0)
 
   for (target in target_list) {
-    target_core <- gsub(remove_prefix, "", target)
-    norm_target <- normalize_text(target_core)
+    norm_target <- normalize_text(target)
 
     exact_idx <- which(norm_display == norm_target)
     if (length(exact_idx) > 0) {
