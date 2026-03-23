@@ -6,6 +6,7 @@ Convert `merged_dataset.csv` into two TSVs usable by MaAsLin2/MaAsLin3 (features
 Produces:
 - dataset/maaslin_features.tsv  (samples x features)
 - dataset/maaslin_ko_features.tsv  (samples x KO features)
+- dataset/maaslin_metabolite_features.tsv  (samples x metabolite features)
 - dataset/maaslin_metadata.tsv  (samples x covariates)
 
 Usage:
@@ -107,6 +108,10 @@ def main():
     ko_cols = [c for c in df.columns if c.startswith('kegg_')]
     print(f"找到 {len(ko_cols)} 个KO特征")
     
+    # 提取代谢物特征列 (met_ 开头的列)
+    met_cols = [c for c in df.columns if c.startswith('met_')]
+    print(f"找到 {len(met_cols)} 个代谢物特征")
+    
     if len(taxonomy_cols) == 0:
         print("错误: 未找到 tax_ 开头的分类学特征列", file=sys.stderr)
         sys.exit(1)
@@ -175,9 +180,28 @@ def main():
         ko_features_df = ko_features_df.loc[metadata_df.index.intersection(ko_features_df.index)]
         ko_features_df.index.name = 'SAMPLE_ID'
     
+    # 准备代谢物特征矩阵 (samples x met features)
+    met_features_df = None
+    if len(met_cols) > 0:
+        met_features_df = df[['SAMPLE_ID'] + met_cols].copy()
+        met_features_df.columns = ['SAMPLE_ID'] + _clean_names(met_cols)
+        met_features_df = met_features_df.set_index('SAMPLE_ID')
+
+        # 转换为数值并移除全零特征
+        met_features_df = met_features_df.apply(pd.to_numeric, errors='coerce').fillna(0)
+        nonzero_met_features = met_features_df.columns[met_features_df.sum() > 0]
+        met_features_df = met_features_df[nonzero_met_features]
+        print(f"移除全零代谢物特征后: {met_features_df.shape[1]} 个特征")
+
+        met_features_df.index = met_features_df.index.astype(str)
+        met_features_df = met_features_df.loc[met_features_df.index.intersection(metadata_df.index)]
+        met_features_df = met_features_df.loc[metadata_df.index.intersection(met_features_df.index)]
+        met_features_df.index.name = 'SAMPLE_ID'
+    
     # 写入输出文件
     feat_out = outdir / "maaslin_features.tsv"
     ko_feat_out = outdir / "maaslin_ko_features.tsv"
+    met_feat_out = outdir / "maaslin_metabolite_features.tsv"
     meta_out = outdir / "maaslin_metadata.tsv"
     
     # 确保索引标签兼容 R 的 read.table(row.names=1)
@@ -188,6 +212,8 @@ def main():
     metadata_df.to_csv(meta_out, sep="\t", index=True, index_label='SAMPLE_ID', na_rep='')
     if ko_features_df is not None:
         ko_features_df.to_csv(ko_feat_out, sep="\t", index=True, index_label='SAMPLE_ID', na_rep='')
+    if met_features_df is not None:
+        met_features_df.to_csv(met_feat_out, sep="\t", index=True, index_label='SAMPLE_ID', na_rep='')
     
     print(f"\n输出文件:")
     print(f"  Features: {feat_out} (samples x features: {features_df.shape})")
@@ -195,6 +221,10 @@ def main():
         print(f"  KO Features: {ko_feat_out} (samples x KO features: {ko_features_df.shape})")
     else:
         print(f"  KO Features: 未导出（未找到 kegg_ 开头特征列）")
+    if met_features_df is not None:
+        print(f"  Metabolite Features: {met_feat_out} (samples x met features: {met_features_df.shape})")
+    else:
+        print(f"  Metabolite Features: 未导出（未找到 met_ 开头特征列）")
     print(f"  Metadata: {meta_out} (samples x covariates: {metadata_df.shape})")
     
     # 打印分组信息供参考

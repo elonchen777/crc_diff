@@ -30,8 +30,9 @@ def load_and_prepare_data() -> pd.DataFrame:
     feature_cols = [c for c in grouped.columns if c.startswith('tax_') or c.startswith('met_')]
     x = grouped[feature_cols].apply(pd.to_numeric, errors='coerce').fillna(0.0)
     x = x.loc[:, x.var(axis=0) > 0].copy()
+    feature_names = x.columns.tolist()
     grouped = pd.concat([grouped[['group']], x], axis=1)
-    return grouped
+    return grouped, feature_names
 
 def get_subset(df: pd.DataFrame, groups: list, positive_class: str = 'CRC') -> tuple[pd.DataFrame, pd.Series]:
     """Retrieve features and binary labels (CTRL=0, other=1) for selected groups."""
@@ -115,7 +116,7 @@ def main():
     out_dir = Path(__file__).resolve().parents[1] / 'results' / 'random_forest_cross_val_roc'
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = load_and_prepare_data()
+    df, feature_names = load_and_prepare_data()
 
     # Split the original dataset to fix the Train and Test pools for all combinations
     # This prevents data leakage (same sample being in A's train and B's test)
@@ -129,6 +130,8 @@ def main():
     
     # Prepare Train Models
     models = {}
+    results_summary = []
+
     for task_name, groups in tasks.items():
         x_train, y_train = get_subset(train_df, groups)
         
@@ -143,12 +146,19 @@ def main():
         models[task_name] = forest
         print(f"Trained {task_name} (Train size: {len(x_train)})")
 
+    # Final Summary for ChatGPT analysis
+    summary_data = []
+
     # ==== Define Top-Tier Journal Colors ====
     journal_colors = ['#E64B35', '#4DBBD5', '#00A087']  # NPG (Nature Publishing Group) style
 
     # Plot ROC for each model using all three validation sets
     for model_name, model in models.items():
         fig, ax = plt.subplots(figsize=(7, 6))
+        
+        # Save model feature importances
+        importance = model.feature_importances_
+        top_indices = np.argsort(importance)[::-1][:50] # Top 50 features
         
         for idx, (val_name, groups) in enumerate(tasks.items()):
             x_test, y_test = get_subset(test_df, groups)
@@ -158,6 +168,22 @@ def main():
             fpr, tpr, _ = roc_curve(y_test, y_proba)
             roc_auc = auc(fpr, tpr)
             
+            # Predict labels for accuracy
+            y_pred = model.predict(x_test)
+            accuracy = (y_pred == y_test).mean()
+
+            # Record metrics for summary CSV
+            for rank, feat_idx in enumerate(top_indices):
+                summary_data.append({
+                    'Trained_Model': model_name,
+                    'Validation_Set': val_name,
+                    'AUC': roc_auc,
+                    'Accuracy': accuracy,
+                    'Feature_Rank': rank + 1,
+                    'Feature_Name': feature_names[feat_idx],
+                    'Importance_Score': importance[feat_idx]
+                })
+
             ax.plot(fpr, tpr, lw=2.5, color=journal_colors[idx % len(journal_colors)], 
                     label=f'{val_name} (AUC = {roc_auc:.3f})')
             
@@ -192,10 +218,15 @@ def main():
 
     # ==== New: Plot Unified Biomarker Importance Heatmap ====
     # The feature names are the same across all models, so we can extract it from the last processed subset
-    all_feature_names = [col for col in train_df.columns if col != 'group']
     unified_heatmap_path = out_dir / 'Biomarker_Importance_Unified_Heatmap.png'
-    plot_importance_heatmap(models, all_feature_names, unified_heatmap_path, top_n=30)
+    plot_importance_heatmap(models, feature_names, unified_heatmap_path, top_n=30)
     print(f"Saved Unified Biomarker Importance Heatmap: {unified_heatmap_path}")
+
+    # ==== New: Save CSV Summary for AI Analysis ====
+    summary_df = pd.DataFrame(summary_data)
+    summary_csv_path = out_dir / 'RF_Cross_Validation_Summary.csv'
+    summary_df.to_csv(summary_csv_path, index=False)
+    print(f"Saved AI-Ready Summary CSV: {summary_csv_path}")
 
 if __name__ == '__main__':
     main()
