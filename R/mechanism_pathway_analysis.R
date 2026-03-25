@@ -33,13 +33,13 @@ config <- list(
   top_n_ko = 1000,
   top_n_metabolite = 1000,
 
-  enable_met_diff = TRUE,
+  enable_met_diff = FALSE,
   enable_sign_consistency = FALSE,
 
-  rho_cutoff = 0.2,
-  fdr_cutoff = 0.1,
+  rho_cutoff = 0.1,
+  fdr_cutoff = 0.05,
 
-  top_n = 100,
+  top_n = 500,
   bootstrap_n = 100,
   bootstrap_frac = 0.8,
   bootstrap_keep_freq = 0.7,

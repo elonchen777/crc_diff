@@ -76,7 +76,7 @@ def main():
 	
 	tax_path = Path("dataset/taxonomy_Species_abund.txt")
 	meta_path = Path("dataset/id_maaslin.xlsx")
-	outdir = Path("dataset")
+	outdir = Path("dataset/maaslin")
 	outdir.mkdir(parents=True, exist_ok=True)
 
 	if not tax_path.exists():

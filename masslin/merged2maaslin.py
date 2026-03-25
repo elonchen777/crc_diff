@@ -70,7 +70,7 @@ def main():
     parser.add_argument(
         '--outdir', 
         type=str, 
-        default='dataset',
+        default='dataset/maaslin',
         help='Output directory for TSV files'
     )
     args = parser.parse_args()
