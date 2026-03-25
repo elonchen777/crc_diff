@@ -17,10 +17,10 @@ library("data.table")
 
 # read data
 message("Reading metadata")
-meta <- fread("dataset/maaslin_metadata.tsv", sep="\t", header=TRUE, data.table=FALSE)
+meta <- fread("dataset/maaslin/maaslin_metadata.tsv", sep="\t", header=TRUE, data.table=FALSE)
 
 message("Reading metabolite features")
-features <- fread("dataset/maaslin_metabolite_features.tsv", sep="\t", header=TRUE, data.table=FALSE)
+features <- fread("dataset/maaslin/maaslin_metabolite_features.tsv", sep="\t", header=TRUE, data.table=FALSE)
 
 # Ensure row names are set
 rownames(meta) <- meta$SAMPLE_ID

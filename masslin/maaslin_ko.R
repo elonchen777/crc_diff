@@ -4,8 +4,8 @@
 #   Rscript masslin/maaslin_ko.R --features dataset/maaslin_ko_features.tsv --meta dataset/maaslin_metadata.tsv --outdir results/maaslin2_ko
 
 outdir <- "results/maaslin2_ko"
-features_path <- "dataset/maaslin_ko_features.tsv"
-meta_path <- "dataset/maaslin_metadata.tsv"
+features_path <- "dataset/maaslin/maaslin_ko_features.tsv"
+meta_path <- "dataset/maaslin/maaslin_metadata.tsv"
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) > 0) {

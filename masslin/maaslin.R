@@ -18,11 +18,11 @@ library("data.table")
 # read data
 message("Reading metadata")
 # meta <- read.table("dataset/maaslin_metadata.tsv", sep="\t", header=TRUE, row.names=1, check.names = FALSE, stringsAsFactors = FALSE)
-meta <- fread("dataset/maaslin_metadata.tsv", sep="\t", header=TRUE, data.table=FALSE)
+meta <- fread("dataset/maaslin/maaslin_metadata.tsv", sep="\t", header=TRUE, data.table=FALSE)
 
 message("Reading features")
 # features <- read.table("dataset/maaslin_features.tsv", sep="\t", header=TRUE, row.names=1, check.names = FALSE)
-features <- fread("dataset/maaslin_features.tsv", sep="\t", header=TRUE, data.table=FALSE)
+features <- fread("dataset/maaslin/maaslin_features.tsv", sep="\t", header=TRUE, data.table=FALSE)
 
 # Ensure samples match
 common <- intersect(rownames(features), rownames(meta))
