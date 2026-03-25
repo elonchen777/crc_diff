@@ -98,7 +98,7 @@ ht_poor      <- make_corr_heatmap("CRC_poor_diff", "CRC-Poor", "#D7263D")
 
 
 # 生成图例
-lgd_sig = Legend(labels = c("p <= 0.05", "p <= 0.01", "p <= 0.001"), 
+lgd_sig = Legend(labels = c("p < 0.05", "p < 0.01", "p < 0.001"), 
                  title = "Significance:", direction = "horizontal",
                  nrow = 1, # 强制平铺在一行
                  grid_height = unit(6, "mm"), grid_width = unit(6, "mm"), # 增加间距

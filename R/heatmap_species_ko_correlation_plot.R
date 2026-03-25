@@ -278,7 +278,7 @@ simplify_species_name <- function(x) {
 species_labels <- vapply(species_cols, simplify_species_name, character(1))
 ko_labels <- gsub("^kegg_", "", ko_cols)
 ko_level2_labels <- setNames(
-  ko_order_info$annotation$level2,
+  ko_order_info$annotation$pathway_name,
   ko_order_info$annotation$ko_col
 )[ko_cols]
 
@@ -317,7 +317,7 @@ level2_colors <- structure(
 ko_level2_factor <- factor(ko_level2_labels, levels = level2_levels)
 
 ko_left_annotation <- rowAnnotation(
-  Level2 = ko_level2_factor,
+  Pathway = ko_level2_factor,
   Abundance = anno_barplot(
     ko_abundance_prop,
     gp = gpar(fill = c("#2E86AB", "#F18F01", "#D7263D"), col = NA),
@@ -327,7 +327,7 @@ ko_left_annotation <- rowAnnotation(
     border = FALSE,
     width = unit(24, "mm")
   ),
-  col = list(Level2 = level2_colors),
+  col = list(Pathway = level2_colors),
   annotation_name_gp = gpar(fontsize = 8, fontface = "bold"),
   annotation_name_rot = 0,
   annotation_name_side = "top",
@@ -418,7 +418,7 @@ ht_well <- make_cross_corr_heatmap("CRC_well_diff", "CRC-Well", "#F18F01", show_
 ht_poor <- make_cross_corr_heatmap("CRC_poor_diff", "CRC-Poor", "#D7263D", show_left_anno = FALSE, show_row_names = FALSE)
 
 lgd_sig <- Legend(
-  labels = c("p <= 0.05", "p <= 0.01", "p <= 0.001"),
+  labels = c("p < 0.05", "p < 0.01", "p < 0.001"),
   title = "Significance:",
   direction = "horizontal",
   nrow = 1,

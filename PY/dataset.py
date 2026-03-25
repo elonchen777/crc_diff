@@ -10,7 +10,7 @@ class BioSmokeDataset:
     def __init__(self, 
                  sample_file: str = 'dataset/id_sample.xlsx',
                  taxonomy_file: str = 'dataset/taxonomy_Species_abund.txt',
-                 metabolomics_file: str = 'dataset/metabolome_all_data.csv',
+                 metabolomics_file: str = 'dataset/metabolome_annotated_data.csv',
                  kegg_file: str = 'dataset/KEGG/4_KOEntry/KEGG_KOEntry_abund.txt',
                  load_kegg: bool = False):   
         """

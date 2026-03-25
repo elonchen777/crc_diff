@@ -47,7 +47,6 @@ FIXED_METABOLITES_LIST <- c(
   "(R)-3-Hydroxy-5-phenylpentanoic acid",
   "N-Methyl-D-glucamine",
   "Chenodeoxycholic acid sulfate",
-  "Creatinine",
   "Lucidenic acid F",
   "Demissidine",
   "Alpha-Hydroxyisobutyric acid",
@@ -55,7 +54,8 @@ FIXED_METABOLITES_LIST <- c(
   "Gentisic acid",
   "D-Galacturonic acid",
   "1,3-Dimethyluric acid",
-  "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate"
+  "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate",
+  "Cholesterol"
 )
 
 normalize_text <- function(x) {
@@ -215,7 +215,13 @@ make_cross_corr_heatmap <- function(
   )
 }
 
-ht_ctrl <- make_cross_corr_heatmap("control", "Ctrl", "#2E86AB")
+ht_ctrl <- make_cross_corr_heatmap(
+  "control",
+  "Ctrl",
+  "#2E86AB",
+  cluster_columns = FALSE,
+  column_order = ctrl_met_order
+)
 ht_well <- make_cross_corr_heatmap(
   "CRC_well_diff",
   "CRC-Well",
@@ -234,7 +240,7 @@ ht_poor <- make_cross_corr_heatmap(
 )
 
 lgd_sig <- Legend(
-  labels = c("p <= 0.05", "p <= 0.01", "p <= 0.001"),
+  labels = c("p < 0.05", "p < 0.01", "p < 0.001"),
   title = "Significance:",
   direction = "horizontal",
   nrow = 1,

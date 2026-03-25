@@ -10,7 +10,7 @@ library(stringr)
 # 设置文件路径
 sample_file <- 'dataset/id_sample.xlsx'
 taxonomy_file <- 'dataset/taxonomy_Species_abund.txt'
-metabolomics_file <- 'dataset/metabolome_data.csv'
+metabolomics_file <- 'dataset/metabolome_annotated_data.csv'
 kegg_file <- 'dataset/KEGG/4_KOEntry/KEGG_KOEntry_abund.txt'
 load_kegg <- TRUE
 

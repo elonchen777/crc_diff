@@ -2,10 +2,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import re
 from pathlib import Path
 from scipy import stats
 from dataset import BioSmokeDataset
 from split_group import prepare_crc_diff_groups
+
+
+def _normalize_metabolite_name(name):
+    return re.sub(r'[^a-z0-9]+', '', str(name).lower())
 
 
 def plot_metabolite_progression(df, target_metabolites, output_dir):
@@ -37,10 +42,35 @@ def plot_metabolite_progression(df, target_metabolites, output_dir):
     # 2. 匹配代谢物列名
     metabolite_cols = [col for col in df.columns if col.startswith('met_')]
     matched_cols = []
+    metabolite_lookup = {}
+    for col in metabolite_cols:
+        raw_name = col[4:].strip().strip('"')
+        metabolite_lookup.setdefault(_normalize_metabolite_name(raw_name), []).append(col)
+
     for m in target_metabolites:
-        matches = [col for col in metabolite_cols if m.lower() in col.lower()]
-        if matches:
-            matched_cols.append(matches[0])
+        normalized_name = _normalize_metabolite_name(m)
+
+        exact_matches = [
+            col for col in metabolite_cols
+            if col[4:].strip().strip('"').lower() == str(m).strip().strip('"').lower()
+        ]
+        if len(exact_matches) == 1:
+            matched_cols.append(exact_matches[0])
+            continue
+
+        normalized_matches = metabolite_lookup.get(normalized_name, [])
+        if len(normalized_matches) == 1:
+            matched_cols.append(normalized_matches[0])
+            continue
+
+        fallback_matches = [
+            col for col in metabolite_cols
+            if normalized_name and normalized_name in _normalize_metabolite_name(col[4:])
+        ]
+        if len(fallback_matches) == 1:
+            matched_cols.append(fallback_matches[0])
+        elif len(fallback_matches) > 1:
+            print(f"Warning: Metabolite {m} matched multiple columns: {fallback_matches}; skipped.")
         else:
             print(f"Warning: Metabolite {m} not found in dataset.")
 
@@ -209,17 +239,17 @@ if __name__ == "__main__":
         "2-Hydroxy-4,7-dimethoxy-2H-1,4-benzoxazin-3(4H)-one",
         "trans-3,5-Dimethoxy-4-hydroxycinnamaldehyde",
         "(R)-3-Hydroxy-5-phenylpentanoic acid",
-        "N-Methyl-D-glucamine"
-        # "Chenodeoxycholic acid sulfate",
-        # "Creatinine",
-        # "Lucidenic acid F",
-        # "Demissidine",
-        # "Alpha-Hydroxyisobutyric acid",
-        # "Pyrocatechol",
-        # "Gentisic acid",
-        # "D-Galacturonic acid",
-        # "1,3-Dimethyluric acid",
-        # "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate"
+        "N-Methyl-D-glucamine",
+        "Chenodeoxycholic acid sulfate",
+        "Lucidenic acid F",
+        "Demissidine",
+        "Alpha-Hydroxyisobutyric acid",
+        "Pyrocatechol",
+        "Gentisic acid",
+        "D-Galacturonic acid",
+        "1,3-Dimethyluric acid",
+        "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate",
+        "Cholesterol"
     ]
 
     plot_metabolite_progression(merged, target_metabolites, "results/progression_plots")
