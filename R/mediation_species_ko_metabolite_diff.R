@@ -36,7 +36,7 @@ FIXED_METABOLITES_LIST <- c(
 
 USE_CRC_ONLY <- FALSE
 N_BOOT <- as.integer(Sys.getenv("N_BOOT", unset = "10"))
-MIN_COMPLETE_CASES <- 25
+MIN_COMPLETE_CASES <- 50
 
 normalize_feature_name <- function(x) {
   x <- trimws(as.character(x))
@@ -333,20 +333,23 @@ out_sig <- file.path(output_dir, "serial_mediation_significant_triplets.csv")
 fwrite(res, out_all)
 fwrite(res %>% filter(status == "ok", serial_sig), out_sig)
 
-plot_df <- res %>%
-  filter(status == "ok", is.finite(serial_indirect)) %>%
-  arrange(desc(abs(serial_indirect))) %>%
-  slice_head(n = 20)
+make_species_forest_plot <- function(species_col, species_slug) {
+  species_df <- res %>%
+    filter(status == "ok", is.finite(serial_indirect), species == species_col) %>%
+    arrange(desc(abs(serial_indirect))) %>%
+    slice_head(n = 20)
 
-if (nrow(plot_df) > 0) {
-  plot_df$path_label <- factor(plot_df$path_label, levels = rev(plot_df$path_label))
-  p1 <- ggplot(plot_df, aes(x = serial_indirect, y = path_label, color = serial_indirect > 0)) +
+  if (nrow(species_df) == 0) return(NULL)
+
+  species_df$path_label <- factor(species_df$path_label, levels = rev(species_df$path_label))
+
+  ggplot(species_df, aes(x = serial_indirect, y = path_label, color = serial_indirect > 0)) +
     geom_vline(xintercept = 0, color = "#7A7A7A", linetype = "dashed", linewidth = 0.4) +
     geom_errorbarh(aes(xmin = serial_ci_low, xmax = serial_ci_high), height = 0.2, linewidth = 0.7) +
     geom_point(size = 2.5) +
     scale_color_manual(values = c("TRUE" = "#B2182B", "FALSE" = "#2166AC"), guide = "none") +
     labs(
-      title = "Serial mediation effects (top |indirect|)",
+      title = paste0("Serial mediation effects (top |indirect|): ", species_slug),
       subtitle = "Path: species -> KO -> metabolite -> diff_group",
       x = "Serial indirect effect (bootstrap 95% CI)",
       y = NULL
@@ -356,9 +359,25 @@ if (nrow(plot_df) > 0) {
       panel.grid.minor = element_blank(),
       plot.title = element_text(face = "bold")
     )
+}
 
-  ggsave(file.path(output_dir, "serial_mediation_forest_top20.pdf"), p1, width = 12.5, height = 8.5, device = cairo_pdf)
-  ggsave(file.path(output_dir, "serial_mediation_forest_top20.png"), p1, width = 12.5, height = 8.5, dpi = 320)
+species_plot_specs <- tibble(
+  species_col = species_cols,
+  species_slug = vapply(species_cols, clean_name, character(1))
+)
+
+for (i in seq_len(nrow(species_plot_specs))) {
+  p_species <- make_species_forest_plot(
+    species_col = species_plot_specs$species_col[i],
+    species_slug = species_plot_specs$species_slug[i]
+  )
+
+  if (!is.null(p_species)) {
+    pdf_name <- paste0("serial_mediation_forest_top20_", species_plot_specs$species_slug[i], ".pdf")
+    png_name <- paste0("serial_mediation_forest_top20_", species_plot_specs$species_slug[i], ".png")
+    ggsave(file.path(output_dir, pdf_name), p_species, width = 12.5, height = 8.5, device = cairo_pdf)
+    ggsave(file.path(output_dir, png_name), p_species, width = 12.5, height = 8.5, dpi = 320)
+  }
 }
 
 best <- res %>%
@@ -430,6 +449,10 @@ if (nrow(best) == 1) {
     ) +
     theme_void(base_size = 11) +
     theme(
+      plot.background = element_rect(fill = "white", color = "white"),
+      panel.background = element_rect(fill = "white", color = "white"),
+      legend.background = element_rect(fill = "white", color = "white"),
+      legend.box.background = element_rect(fill = "white", color = "white"),
       plot.title = element_text(face = "bold", hjust = 0.5),
       plot.subtitle = element_text(hjust = 0.5)
     )

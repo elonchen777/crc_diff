@@ -52,17 +52,17 @@ FIXED_METABOLITES_LIST <- c(
   "2-Hydroxy-4,7-dimethoxy-2H-1,4-benzoxazin-3(4H)-one",
   "trans-3,5-Dimethoxy-4-hydroxycinnamaldehyde",
   "(R)-3-Hydroxy-5-phenylpentanoic acid",
-  "N-Methyl-D-glucamine"
-  # "Chenodeoxycholic acid sulfate",
-  # "Creatinine",
-  # "Lucidenic acid F",
-  # "Demissidine",
-  # "Alpha-Hydroxyisobutyric acid",
-  # "Pyrocatechol",
-  # "Gentisic acid",
-  # "D-Galacturonic acid",
-  # "1,3-Dimethyluric acid",
-  # "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate"
+  "N-Methyl-D-glucamine",
+  "Chenodeoxycholic acid sulfate",
+  "Lucidenic acid F",
+  "Demissidine",
+  "Alpha-Hydroxyisobutyric acid",
+  "Pyrocatechol",
+  "Gentisic acid",
+  "D-Galacturonic acid",
+  "1,3-Dimethyluric acid",
+  "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate",
+  "Cholesterol"
 )
 
 normalize_feature_name <- function(x) {

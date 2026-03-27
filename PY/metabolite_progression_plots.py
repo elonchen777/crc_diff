@@ -230,6 +230,7 @@ if __name__ == "__main__":
     merged = ds.intersection_to_dataframe()
 
     target_metabolites = [
+        "Cholesterol",
         "SQDG 26:2; SQDG(13:1/13:1)",
         "Perfluorooctanesulfonic acid",
         "N-Methyl-D-glucamine",
@@ -248,8 +249,7 @@ if __name__ == "__main__":
         "Gentisic acid",
         "D-Galacturonic acid",
         "1,3-Dimethyluric acid",
-        "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate",
-        "Cholesterol"
+        "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate"
     ]
 
     plot_metabolite_progression(merged, target_metabolites, "results/progression_plots")

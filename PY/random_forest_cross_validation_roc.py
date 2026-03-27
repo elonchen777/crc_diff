@@ -16,7 +16,64 @@ GROUP_MAP = {
     'CRC_poordiff': 'CRC-Poor',
 }
 
-def load_and_prepare_data() -> pd.DataFrame:
+FIXED_SPECIES_LIST = [
+    'Peptostreptococcus_stomatis',
+    'Porphyromonas_gingivalis',
+    'Prevotella_intermedia',
+    'Fusobacterium_periodonticum',
+    'Campylobacter_rectus',
+    'Faecalibacterium_prausnitzii',
+    'Roseburia_intestinalis',
+    'Eubacterium_rectale',
+    'Coprococcus_comes',
+    'Ruminococcus_lactaris'
+]
+
+FIXED_METABOLITES_LIST = [
+    "SQDG 26:2; SQDG(13:1/13:1)",
+    "Cytosine",
+    "Perfluorooctanesulfonic acid",
+    "Methyl dihydrojasmonate",
+    "Pyrogallol-2-O-sulphate",
+    "5'-(3',4'-Dihydroxyphenyl)-gamma-valerolactone sulfate",
+    "2-Hydroxy-4,7-dimethoxy-2H-1,4-benzoxazin-3(4H)-one",
+    "trans-3,5-Dimethoxy-4-hydroxycinnamaldehyde",
+    "(R)-3-Hydroxy-5-phenylpentanoic acid",
+    "N-Methyl-D-glucamine",
+    "Chenodeoxycholic acid sulfate",
+    "Lucidenic acid F",
+    "Demissidine",
+    "Alpha-Hydroxyisobutyric acid",
+    "Pyrocatechol",
+    "Gentisic acid",
+    "D-Galacturonic acid",
+    "1,3-Dimethyluric acid",
+    "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate",
+    "Cholesterol"
+]
+
+# Optional switch: if True, only fixed species/metabolites are used as biomarkers.
+USE_FIXED_BIOMARKERS = True
+
+
+def match_fixed_features(columns: list[str], target_list: list[str], prefix: str) -> list[str]:
+    matched = []
+    missing = []
+
+    for target in target_list:
+        # Match by substring to tolerate source column naming details.
+        matches = [column for column in columns if column.startswith(prefix) and target.lower() in column.lower()]
+        if matches:
+            matched.append(matches[0])
+        else:
+            missing.append(target)
+
+    if missing:
+        raise ValueError(f'以下 biomarker 在数据中未找到: {missing}')
+
+    return matched
+
+def load_and_prepare_data(use_fixed_biomarkers: bool = USE_FIXED_BIOMARKERS) -> pd.DataFrame:
     ds = BioSmokeDataset()
     ds.preprocess_taxonomy_data(transform=True)
     ds.preprocess_metabolomics_data(relative_abund=False, transform=True)
@@ -28,10 +85,18 @@ def load_and_prepare_data() -> pd.DataFrame:
     
     # Feature extraction
     feature_cols = [c for c in grouped.columns if c.startswith('tax_') or c.startswith('met_')]
+
+    if use_fixed_biomarkers:
+        matched_species = match_fixed_features(feature_cols, FIXED_SPECIES_LIST, 'tax_')
+        matched_metabolites = match_fixed_features(feature_cols, FIXED_METABOLITES_LIST, 'met_')
+        feature_cols = matched_species + matched_metabolites
+
     x = grouped[feature_cols].apply(pd.to_numeric, errors='coerce').fillna(0.0)
     x = x.loc[:, x.var(axis=0) > 0].copy()
     feature_names = x.columns.tolist()
     grouped = pd.concat([grouped[['group']], x], axis=1)
+    if use_fixed_biomarkers:
+        print(f'Using fixed biomarkers only: {len(feature_names)} features')
     return grouped, feature_names
 
 def get_subset(df: pd.DataFrame, groups: list, positive_class: str = 'CRC') -> tuple[pd.DataFrame, pd.Series]:
@@ -87,21 +152,31 @@ def plot_importance_heatmap(models, feature_names, out_path, top_n=30):
     
     top_imp_df = imp_df.head(top_n).drop(columns=['mean_imp'])
     
-    clean_labels = [f.replace('tax_', '').replace('met_', '')[:40] for f in top_imp_df.index]
+    biomarker_types = ['species' if feature.startswith('tax_') else 'metabolite' for feature in top_imp_df.index]
+    clean_labels = [
+        f.replace('tax_', '').replace('met_', '').replace('s__', '')[:40]
+        for f in top_imp_df.index
+    ]
     top_imp_df.index = clean_labels
-    
-    fig, ax = plt.subplots(figsize=(7, max(8, top_n * 0.35)))
+
+    # Horizontal layout: biomarkers on x-axis, models on y-axis.
+    top_imp_df = top_imp_df.T
+    fig, ax = plt.subplots(figsize=(max(10, top_n * 0.45), 4.2))
     
     # Use a professional, linear sequential colormap e.g., 'rocket_r' or 'mako_r' from Seaborn
     sns.heatmap(top_imp_df, cmap='flare', linewidths=0.5, linecolor='white',
-                cbar_kws={'label': 'Mean Decrease in Impurity', 'shrink': 0.8}, ax=ax)
+                cbar_kws={'shrink': 0.8}, ax=ax)
     
     ax.set_title('Top Biomarker Importances Across Models', fontsize=16, fontweight='bold', pad=18)
-    ax.set_ylabel('Biomarker', fontsize=14, fontweight='bold')
-    # ax.set_xlabel('Trained Models', fontsize=14, fontweight='bold')
     
-    plt.yticks(rotation=0, fontsize=11)
-    plt.xticks(rotation=30, ha='right', fontsize=12, fontweight='bold')
+    plt.yticks(rotation=0, fontsize=11, fontweight='bold')
+    plt.xticks(rotation=45, ha='right', fontsize=10)
+
+    # Species names stay italic; metabolites and model labels remain normal.
+    for label, biomarker_type in zip(ax.get_xticklabels(), biomarker_types):
+        label.set_fontstyle('italic' if biomarker_type == 'species' else 'normal')
+    for label in ax.get_yticklabels():
+        label.set_fontstyle('normal')
     
     # Remove spines for the heatmap and ensure grid is off
     sns.despine(ax=ax, left=True, bottom=True, top=True, right=True)

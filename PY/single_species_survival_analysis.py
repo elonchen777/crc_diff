@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -52,10 +52,11 @@ def km_curve(times: np.ndarray, events: np.ndarray):
     order = np.argsort(times)
     t = times[order]
     e = events[order]
+    max_followup = float(np.nanmax(t)) if len(t) > 0 else 0.0
 
     uniq_event_times = np.unique(t[e == 1])
     if len(uniq_event_times) == 0:
-        return np.array([0.0]), np.array([1.0])
+        return np.array([0.0, max_followup]), np.array([1.0, 1.0])
 
     surv = 1.0
     xs = [0.0]
@@ -68,6 +69,12 @@ def km_curve(times: np.ndarray, events: np.ndarray):
             surv *= (1.0 - d_i / at_risk)
         xs.extend([ti, ti])
         ys.extend([ys[-1], surv])
+
+    # Extend the final horizontal segment to the last observed follow-up time
+    # so censored marks after the last event remain on the KM curve.
+    if max_followup > xs[-1]:
+        xs.append(max_followup)
+        ys.append(ys[-1])
 
     return np.array(xs), np.array(ys)
 
@@ -224,15 +231,17 @@ def make_km_plot(
     ax.set_xlabel("")
     ax.tick_params(axis="x", labelbottom=False)
     ax.set_ylabel(y_label)
+    ax.set_yticks(np.linspace(0.4, 1.0, 7))
     handles, labels = ax.get_legend_handles_labels()
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
+    fig.suptitle(title, y=0.985, fontsize=15, fontweight="bold")
     fig.legend(
         handles,
         labels,
         title=legend_title,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.03),
+        bbox_to_anchor=(0.55, 0.953),
         ncol=max(1, len(labels)),
         fontsize=9,
         title_fontsize=9,
@@ -240,7 +249,7 @@ def make_km_plot(
         handlelength=1.8,
         columnspacing=1.5,
     )
-    fig.text(0.5, 0.945, subtitle, ha="center", va="center", fontsize=10.5, color="#303030")
+    fig.text(0.55, 0.32, subtitle, ha="center", va="center", fontsize=10.5, color="#303030")
 
     # Risk set sizes panel: y-axis groups, x-axis days
     if x_max is None or x_max <= 0:
@@ -276,13 +285,7 @@ def make_km_plot(
     for spine in ["top", "right"]:
         ax_risk.spines[spine].set_visible(False)
 
-    # Use constrained_layout or manual adjustment if tight_layout warns about GridSpec/RiskSet
-    # Given the rect=[0, 0, 1, 0.93] to accommodate the top legend/subtitle
-    # We can use subplots_adjust if tight_layout fails to handle the height_ratios correctly
-    try:
-        fig.tight_layout(rect=[0, 0, 1, 0.93])
-    except:
-        fig.subplots_adjust(top=0.9, bottom=0.1, left=0.12, right=0.95, hspace=0.1)
+    fig.subplots_adjust(top=0.86, bottom=0.11, left=0.12, right=0.96, hspace=0.08)
 
     fig.savefig(out_png)
     plt.close(fig)
@@ -447,11 +450,6 @@ def make_recur_plots(df, species, out_prefix, group_col="abundance_group", group
 
 
 def main():
-    species_list = [
-        "Peptostreptococcus_stomatis",
-        "Faecalibacterium_prausnitzii",
-    ]
-
     abundance_file = Path("dataset/merged_dataset_relative.csv")
     survival_file = Path("dataset/survival/crc_os_pfs_full.csv")
     out_dir = Path("results/R_plots/single_species_survival")
@@ -477,154 +475,71 @@ def main():
 
     fallback = (joined["recur_event"] == 1) & (~np.isfinite(joined["recur_time_days"]) | (joined["recur_time_days"] < 0))
     joined.loc[fallback, "recur_time_days"] = joined.loc[fallback, "PFS_time_days"]
+    # Keep only differentiation-based OS/PFS survival analysis and plotting.
+    if "differentiation" not in joined.columns:
+        raise ValueError("differentiation column not found in merged data")
 
-    stats_rows = []
+    diff_dat = joined[["SAMPLE_ID", "OS_time_days", os_event_col, "PFS_time_days", pfs_event_col, "differentiation"]].copy()
+    diff_dat = diff_dat.rename(columns={os_event_col: "OS_event", pfs_event_col: "PFS_event"})
+    diff_dat["differentiation"] = pd.to_numeric(diff_dat["differentiation"], errors="coerce")
+    diff_dat = diff_dat[diff_dat["differentiation"].isin([0, 1])].copy()
+    diff_dat["diff_group"] = np.where(diff_dat["differentiation"] == 1, "CRC-Poor", "CRC-Well")
 
-    for sp in species_list:
-        sp_col = f"tax_s__{sp}"
-        if sp_col not in joined.columns:
-            print(f"[WARN] Missing species column: {sp_col}")
-            continue
+    p_logrank_os_d = weighted_logrank_test(diff_dat["OS_time_days"].values, diff_dat["OS_event"].values, diff_dat["diff_group"].values, weight="logrank")
+    p_breslow_os_d = weighted_logrank_test(diff_dat["OS_time_days"].values, diff_dat["OS_event"].values, diff_dat["diff_group"].values, weight="breslow")
+    p_tarone_os_d = weighted_logrank_test(diff_dat["OS_time_days"].values, diff_dat["OS_event"].values, diff_dat["diff_group"].values, weight="tarone")
 
-        dat = joined[["SAMPLE_ID", "OS_time_days", os_event_col, "PFS_time_days", pfs_event_col, "recur_event", "recur_time_days", sp_col]].copy()
-        dat = dat.rename(columns={sp_col: "abundance"})
-        dat = dat.rename(columns={os_event_col: "OS_event", pfs_event_col: "PFS_event"})
-        dat["abundance"] = pd.to_numeric(dat["abundance"], errors="coerce")
+    p_logrank_pfs_d = weighted_logrank_test(diff_dat["PFS_time_days"].values, diff_dat["PFS_event"].values, diff_dat["diff_group"].values, weight="logrank")
+    p_breslow_pfs_d = weighted_logrank_test(diff_dat["PFS_time_days"].values, diff_dat["PFS_event"].values, diff_dat["diff_group"].values, weight="breslow")
+    p_tarone_pfs_d = weighted_logrank_test(diff_dat["PFS_time_days"].values, diff_dat["PFS_event"].values, diff_dat["diff_group"].values, weight="tarone")
 
-        med = float(np.nanmedian(dat["abundance"].values))
-        dat["abundance_group"] = np.where(dat["abundance"] >= med, "High", "Low")
+    os_sub_d = (
+        f"Log-Rank p={format_p(p_logrank_os_d)}"
+    )
+    pfs_sub_d = (
+        f"Log-Rank p={format_p(p_logrank_pfs_d)}"
+    )
 
-        p_logrank_os = weighted_logrank_test(dat["OS_time_days"].values, dat["OS_event"].values, dat["abundance_group"].values, weight="logrank")
-        p_breslow_os = weighted_logrank_test(dat["OS_time_days"].values, dat["OS_event"].values, dat["abundance_group"].values, weight="breslow")
-        p_tarone_os = weighted_logrank_test(dat["OS_time_days"].values, dat["OS_event"].values, dat["abundance_group"].values, weight="tarone")
+    make_km_plot(
+        diff_dat,
+        "OS_time_days",
+        "OS_event",
+        "diff_group",
+        "Differentiation impact on Overall Survival (KM)",
+        os_sub_d,
+        str(out_dir / "differentiation_KM_OS.png"),
+        palette_override={"CRC-Poor": "#D7263D", "CRC-Well": "#F18F01"},
+        legend_title="Differentiation group",
+        y_label="OS survival probability",
+    )
+    make_km_plot(
+        diff_dat,
+        "PFS_time_days",
+        "PFS_event",
+        "diff_group",
+        "Differentiation impact on Progression-Free Survival (KM)",
+        pfs_sub_d,
+        str(out_dir / "differentiation_KM_PFS.png"),
+        palette_override={"CRC-Poor": "#D7263D", "CRC-Well": "#F18F01"},
+        legend_title="Differentiation group",
+        y_label="PFS survival probability",
+    )
 
-        p_logrank_pfs = weighted_logrank_test(dat["PFS_time_days"].values, dat["PFS_event"].values, dat["abundance_group"].values, weight="logrank")
-        p_breslow_pfs = weighted_logrank_test(dat["PFS_time_days"].values, dat["PFS_event"].values, dat["abundance_group"].values, weight="breslow")
-        p_tarone_pfs = weighted_logrank_test(dat["PFS_time_days"].values, dat["PFS_event"].values, dat["abundance_group"].values, weight="tarone")
-
-        stats_rows.append({
-            "species": sp,
-            "median_abundance": med,
-            "n": int(len(dat)),
-            "n_low": int((dat["abundance_group"] == "Low").sum()),
-            "n_high": int((dat["abundance_group"] == "High").sum()),
-            "p_logrank_os": p_logrank_os,
-            "p_breslow_os": p_breslow_os,
-            "p_tarone_os": p_tarone_os,
-            "p_logrank_pfs": p_logrank_pfs,
-            "p_breslow_pfs": p_breslow_pfs,
-            "p_tarone_pfs": p_tarone_pfs,
-        })
-
-        os_sub = f"log-rank p={p_logrank_os:.3g} | breslow p={p_breslow_os:.3g} | tarone p={p_tarone_os:.3g}"
-        pfs_sub = f"log-rank p={p_logrank_pfs:.3g} | breslow p={p_breslow_pfs:.3g} | tarone p={p_tarone_pfs:.3g}"
-
-        prefix = out_dir / sp
-        make_km_plot(
-            dat,
-            "OS_time_days",
-            "OS_event",
-            "abundance_group",
-            f"{sp} - Overall Survival (KM)",
-            os_sub,
-            f"{prefix}_KM_OS.png",
-            legend_title="Abundance group",
-            y_label="OS survival probability",
-        )
-        make_km_plot(
-            dat,
-            "PFS_time_days",
-            "PFS_event",
-            "abundance_group",
-            f"{sp} - Progression-Free Survival (KM)",
-            pfs_sub,
-            f"{prefix}_KM_PFS.png",
-            legend_title="Abundance group",
-            y_label="PFS survival probability",
-        )
-        make_recur_plots(dat, sp, str(prefix))
-
-        dat.to_csv(f"{prefix}_patient_level.csv", index=False)
-
-    if stats_rows:
-        pd.DataFrame(stats_rows).to_csv(out_dir / "single_species_survival_stats.csv", index=False)
-
-    # Additional analysis: impact of differentiation on survival and recurrence
-    if "differentiation" in joined.columns:
-        diff_dat = joined[["SAMPLE_ID", "OS_time_days", os_event_col, "PFS_time_days", pfs_event_col, "recur_event", "recur_time_days", "differentiation"]].copy()
-        diff_dat = diff_dat.rename(columns={os_event_col: "OS_event", pfs_event_col: "PFS_event"})
-        diff_dat["differentiation"] = pd.to_numeric(diff_dat["differentiation"], errors="coerce")
-        diff_dat = diff_dat[diff_dat["differentiation"].isin([0, 1])].copy()
-        diff_dat["diff_group"] = np.where(diff_dat["differentiation"] == 1, "CRC_poordiff", "CRC_welldiff")
-
-        p_logrank_os_d = weighted_logrank_test(diff_dat["OS_time_days"].values, diff_dat["OS_event"].values, diff_dat["diff_group"].values, weight="logrank")
-        p_breslow_os_d = weighted_logrank_test(diff_dat["OS_time_days"].values, diff_dat["OS_event"].values, diff_dat["diff_group"].values, weight="breslow")
-        p_tarone_os_d = weighted_logrank_test(diff_dat["OS_time_days"].values, diff_dat["OS_event"].values, diff_dat["diff_group"].values, weight="tarone")
-
-        p_logrank_pfs_d = weighted_logrank_test(diff_dat["PFS_time_days"].values, diff_dat["PFS_event"].values, diff_dat["diff_group"].values, weight="logrank")
-        p_breslow_pfs_d = weighted_logrank_test(diff_dat["PFS_time_days"].values, diff_dat["PFS_event"].values, diff_dat["diff_group"].values, weight="breslow")
-        p_tarone_pfs_d = weighted_logrank_test(diff_dat["PFS_time_days"].values, diff_dat["PFS_event"].values, diff_dat["diff_group"].values, weight="tarone")
-
-        os_sub_d = (
-            f"log-rank p={format_p(p_logrank_os_d)} | "
-            f"breslow p={format_p(p_breslow_os_d)} | "
-            f"tarone p={format_p(p_tarone_os_d)}"
-        )
-        pfs_sub_d = (
-            f"log-rank p={format_p(p_logrank_pfs_d)} | "
-            f"breslow p={format_p(p_breslow_pfs_d)} | "
-            f"tarone p={format_p(p_tarone_pfs_d)}"
-        )
-
-        make_km_plot(
-            diff_dat,
-            "OS_time_days",
-            "OS_event",
-            "diff_group",
-            "Differentiation impact on Overall Survival (KM)",
-            os_sub_d,
-            str(out_dir / "differentiation_KM_OS.png"),
-            palette_override={"CRC_poordiff": "#FF6B6B", "CRC_welldiff": "#FFD166"},
-            legend_title="Differentiation group",
-            y_label="OS survival probability",
-        )
-        make_km_plot(
-            diff_dat,
-            "PFS_time_days",
-            "PFS_event",
-            "diff_group",
-            "Differentiation impact on Progression-Free Survival (KM)",
-            pfs_sub_d,
-            str(out_dir / "differentiation_KM_PFS.png"),
-            palette_override={"CRC_poordiff": "#FF6B6B", "CRC_welldiff": "#FFD166"},
-            legend_title="Differentiation group",
-            y_label="PFS survival probability",
-        )
-
-        make_recur_plots(
-            diff_dat,
-            "Differentiation",
-            str(out_dir / "differentiation"),
-            group_col="diff_group",
-            group_title="Differentiation group",
-            palette_override={"CRC_poordiff": "#FF6B6B", "CRC_welldiff": "#FFD166"},
-        )
-
-        diff_stats = pd.DataFrame([
-            {
-                "analysis": "differentiation",
-                "n": int(len(diff_dat)),
-                "n_well_moderate": int((diff_dat["diff_group"] == "CRC_welldiff").sum()),
-                "n_poor": int((diff_dat["diff_group"] == "CRC_poordiff").sum()),
-                "p_logrank_os": p_logrank_os_d,
-                "p_breslow_os": p_breslow_os_d,
-                "p_tarone_os": p_tarone_os_d,
-                "p_logrank_pfs": p_logrank_pfs_d,
-                "p_breslow_pfs": p_breslow_pfs_d,
-                "p_tarone_pfs": p_tarone_pfs_d,
-            }
-        ])
-        diff_stats.to_csv(out_dir / "differentiation_survival_recurrence_stats.csv", index=False)
+    diff_stats = pd.DataFrame([
+        {
+            "analysis": "differentiation",
+            "n": int(len(diff_dat)),
+            "n_well_moderate": int((diff_dat["diff_group"] == "CRC-Well").sum()),
+            "n_poor": int((diff_dat["diff_group"] == "CRC-Poor").sum()),
+            "p_logrank_os": p_logrank_os_d,
+            "p_breslow_os": p_breslow_os_d,
+            "p_tarone_os": p_tarone_os_d,
+            "p_logrank_pfs": p_logrank_pfs_d,
+            "p_breslow_pfs": p_breslow_pfs_d,
+            "p_tarone_pfs": p_tarone_pfs_d,
+        }
+    ])
+    diff_stats.to_csv(out_dir / "differentiation_survival_stats.csv", index=False)
 
     print(f"Done. Outputs in: {out_dir}")
 
