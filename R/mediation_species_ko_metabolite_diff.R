@@ -380,17 +380,12 @@ for (i in seq_len(nrow(species_plot_specs))) {
   }
 }
 
-best <- res %>%
-  filter(status == "ok", is.finite(serial_indirect)) %>%
-  arrange(desc(abs(serial_indirect))) %>%
-  slice_head(n = 1)
-
-if (nrow(best) == 1) {
+make_best_chain_plot <- function(best_row, species_slug) {
   nd <- tibble(
     node = c("Species", "KO", "Metabolite", "DiffGroup"),
     x = c(1, 2, 3, 4),
     y = c(1, 1, 1, 1),
-    label = c(best$species_name, best$ko_name, best$metabolite_name, "diff_group")
+    label = c(best_row$species_name, best_row$ko_name, best_row$metabolite_name, "diff_group")
   )
 
   ed <- tibble(
@@ -399,15 +394,15 @@ if (nrow(best) == 1) {
     y = c(1, 1, 1, 0.90),
     yend = c(1, 1, 1, 0.90),
     label = c(
-      paste0("a1=", round(best$a1, 3)),
-      paste0("d21=", round(best$d21, 3)),
-      paste0("b2=", round(best$b2, 3)),
-      paste0("c' =", round(best$c_prime, 3))
+      paste0("a1=", round(best_row$a1, 3)),
+      paste0("d21=", round(best_row$d21, 3)),
+      paste0("b2=", round(best_row$b2, 3)),
+      paste0("c' =", round(best_row$c_prime, 3))
     ),
     edge_type = c("main", "main", "main", "direct")
   )
 
-  p2 <- ggplot() +
+  ggplot() +
     geom_curve(
       data = ed,
       aes(x = x, y = y, xend = xend, yend = yend, linetype = edge_type),
@@ -435,8 +430,8 @@ if (nrow(best) == 1) {
       x = 2.5,
       y = 1.35,
       label = paste0(
-        "Serial indirect = ", round(best$serial_indirect, 4),
-        "\n95% CI [", round(best$serial_ci_low, 4), ", ", round(best$serial_ci_high, 4), "]"
+        "Serial indirect = ", round(best_row$serial_indirect, 4),
+        "\n95% CI [", round(best_row$serial_ci_low, 4), ", ", round(best_row$serial_ci_high, 4), "]"
       ),
       size = 3.5,
       fontface = "bold"
@@ -444,7 +439,7 @@ if (nrow(best) == 1) {
     scale_linetype_manual(values = c(main = "solid", direct = "dashed"), guide = "none") +
     coord_cartesian(xlim = c(0.5, 4.5), ylim = c(0.65, 1.5), clip = "off") +
     labs(
-      title = "Best serial mediation chain",
+      title = paste0("Best serial mediation chain: ", species_slug),
       subtitle = "species -> KO -> metabolite -> diff_group"
     ) +
     theme_void(base_size = 11) +
@@ -456,9 +451,30 @@ if (nrow(best) == 1) {
       plot.title = element_text(face = "bold", hjust = 0.5),
       plot.subtitle = element_text(hjust = 0.5)
     )
+}
 
-  ggsave(file.path(output_dir, "serial_mediation_best_chain.pdf"), p2, width = 10.8, height = 4.6, device = cairo_pdf)
-  ggsave(file.path(output_dir, "serial_mediation_best_chain.png"), p2, width = 10.8, height = 4.6, dpi = 320)
+species_best_specs <- tibble(
+  species_col = species_cols,
+  species_slug = vapply(species_cols, clean_name, character(1))
+)
+
+for (i in seq_len(nrow(species_best_specs))) {
+  one_species_best <- res %>%
+    filter(status == "ok", is.finite(serial_indirect), species == species_best_specs$species_col[i]) %>%
+    arrange(desc(abs(serial_indirect))) %>%
+    slice_head(n = 1)
+
+  if (nrow(one_species_best) == 0) next
+
+  p2 <- make_best_chain_plot(
+    best_row = one_species_best,
+    species_slug = species_best_specs$species_slug[i]
+  )
+
+  pdf_name <- paste0("serial_mediation_best_chain_", species_best_specs$species_slug[i], ".pdf")
+  png_name <- paste0("serial_mediation_best_chain_", species_best_specs$species_slug[i], ".png")
+  ggsave(file.path(output_dir, pdf_name), p2, width = 10.8, height = 4.6, device = cairo_pdf)
+  ggsave(file.path(output_dir, png_name), p2, width = 10.8, height = 4.6, dpi = 320)
 }
 
 summary_txt <- file.path(output_dir, "serial_mediation_summary.txt")

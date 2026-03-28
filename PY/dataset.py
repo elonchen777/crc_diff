@@ -149,6 +149,9 @@ class BioSmokeDataset:
     def preprocess_metabolomics_data(self, remove_high_missing: bool = True,
                                      missing_threshold: float = 0.5,
                                      min_samples: int = None,
+                                     remove_low_expression: bool = False,
+                                     min_abund_threshold: float = 100.0,
+                                     min_prevalence_threshold: float = 0.1,
                                      remove_outliers: bool = False,
                                      outlier_method: str = 'iqr',
                                      outlier_threshold: float = 3.0,
@@ -174,6 +177,16 @@ class BioSmokeDataset:
         metab_col = meta_data.columns[0]
         meta_data = meta_data.drop_duplicates(subset=[metab_col], keep='first')
         sample_cols = meta_data.columns[1:]
+
+        if remove_low_expression:
+            meta_data[sample_cols] = meta_data[sample_cols].apply(pd.to_numeric, errors='coerce')
+            expression_counts = (meta_data[sample_cols] > min_abund_threshold).sum(axis=1)
+            meta_data = meta_data[expression_counts >= min_prevalence_threshold * len(sample_cols)]
+            print(
+                f"去除低表达代谢物: 保留 {meta_data.shape[0]} 个代谢物 "
+                f"(丰度阈值: {min_abund_threshold}, 流行度阈值: {min_prevalence_threshold*100:.1f}%)"
+            )
+            sample_cols = meta_data.columns[1:]
         
         if remove_high_missing:
             meta_data[sample_cols] = meta_data[sample_cols].apply(pd.to_numeric, errors='coerce')
@@ -430,6 +443,35 @@ class BioSmokeDataset:
             # 第一行是标签行（分组信息），第二行开始是实际数据
             # 第一列是代谢物标识
             print(f"代谢组数据形状: {self.metabolomics_data.shape}")
+
+            if self.metabolomics_data.shape[1] > 0 and self.metabolomics_data.shape[0] > 0:
+                metab_col = self.metabolomics_data.columns[0]
+                start_idx = 0
+                first_cell = str(self.metabolomics_data.iloc[0, 0]).strip().lower()
+                if first_cell in ('lable', 'label'):
+                    start_idx = 1
+
+                body = self.metabolomics_data.iloc[start_idx:].copy()
+                body[metab_col] = body[metab_col].astype(str).str.strip()
+
+                non_empty = body[metab_col].notna() & (body[metab_col] != '') & (body[metab_col].str.lower() != 'nan')
+                dropped_empty = int((~non_empty).sum())
+                if dropped_empty > 0:
+                    print(f"加载阶段去除空代谢物ID: {dropped_empty} 条")
+                body = body[non_empty].copy()
+
+                dup_rows = body.duplicated(subset=[metab_col], keep='first')
+                dup_count = int(dup_rows.sum())
+                if dup_count > 0:
+                    print(f"加载阶段去除重复代谢物ID: {dup_count} 条")
+                    body = body[~dup_rows].copy()
+
+                if start_idx == 1:
+                    self.metabolomics_data = pd.concat([self.metabolomics_data.iloc[[0]], body], ignore_index=True)
+                else:
+                    self.metabolomics_data = body.reset_index(drop=True)
+
+                print(f"代谢组数据清洗后形状: {self.metabolomics_data.shape}")
             
             # 检查第一行是否为标签行
             if self.metabolomics_data.iloc[0, 0] == 'Lable':
@@ -456,6 +498,22 @@ class BioSmokeDataset:
             self.kegg_data = pd.read_csv(self.kegg_file, sep='\t')
 
             self.kegg_data.columns = self.kegg_data.columns.str.strip()
+
+            if self.kegg_data.shape[1] > 0 and self.kegg_data.shape[0] > 0:
+                ko_col = self.kegg_data.columns[0]
+                self.kegg_data[ko_col] = self.kegg_data[ko_col].astype(str).str.strip()
+
+                non_empty = self.kegg_data[ko_col].notna() & (self.kegg_data[ko_col] != '') & (self.kegg_data[ko_col].str.lower() != 'nan')
+                dropped_empty = int((~non_empty).sum())
+                if dropped_empty > 0:
+                    print(f"加载阶段去除空KO ID: {dropped_empty} 条")
+                self.kegg_data = self.kegg_data[non_empty].copy()
+
+                dup_rows = self.kegg_data.duplicated(subset=[ko_col], keep='first')
+                dup_count = int(dup_rows.sum())
+                if dup_count > 0:
+                    print(f"加载阶段去除重复KO ID: {dup_count} 条")
+                    self.kegg_data = self.kegg_data[~dup_rows].copy()
 
             print(f"KEGG数据形状: {self.kegg_data.shape}")
 

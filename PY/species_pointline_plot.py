@@ -26,9 +26,9 @@ from dataset import BioSmokeDataset
 from split_group import prepare_crc_diff_groups
 
 GROUP_COLORS = {
-    "CRC_poordiff": "#FF6B6B",
-    "CRC_welldiff": "#FFD166",
-    "CTRL": "#06D6A0",
+    'CRC_poordiff': '#D7263D',
+    'CRC_welldiff': '#F18F01',
+    'CTRL': '#2E86AB'
 }
 GROUP_ORDER = ["CTRL", "CRC_welldiff", "CRC_poordiff"]
 GROUP_TITLE = {
@@ -74,7 +74,10 @@ def _canonicalize_label(label: str) -> str:
 
 
 def _find_species_column(df: pd.DataFrame, target_name: str) -> str:
-    species_cols = [col for col in df.columns if col.startswith("tax_")]
+    # Align with R heatmap script, which uses tax_s__ species columns.
+    species_cols = [col for col in df.columns if col.startswith("tax_s__")]
+    if not species_cols:
+        species_cols = [col for col in df.columns if col.startswith("tax_")]
     target_key = _canonicalize_label(target_name)
 
     exact_matches = [col for col in species_cols if _canonicalize_label(col) == target_key]
@@ -98,20 +101,38 @@ def _find_species_column(df: pd.DataFrame, target_name: str) -> str:
     )
 
 
-def _pearson_ci(x: pd.Series, y: pd.Series, confidence: float = 0.95) -> tuple[float, float, float, float]:
-    r, p_value = stats.pearsonr(x, y)
+def _spearman_stats_with_bootstrap_ci(
+    x: pd.Series,
+    y: pd.Series,
+    confidence: float = 0.95,
+    n_boot: int = 2000,
+    random_state: int = 42,
+) -> tuple[float, float, float, float]:
+    rho, p_value = stats.spearmanr(x, y)
     n = len(x)
 
-    if n <= 3 or np.isclose(abs(r), 1.0):
-        return r, p_value, np.nan, np.nan
+    if n <= 3 or np.isnan(rho):
+        return float(rho), float(p_value), np.nan, np.nan
 
-    clipped_r = float(np.clip(r, -0.999999, 0.999999))
-    z = np.arctanh(clipped_r)
-    se = 1.0 / np.sqrt(n - 3)
-    z_crit = stats.norm.ppf((1.0 + confidence) / 2.0)
-    ci_low = np.tanh(z - z_crit * se)
-    ci_high = np.tanh(z + z_crit * se)
-    return r, p_value, ci_low, ci_high
+    rng = np.random.default_rng(random_state)
+    x_arr = np.asarray(x)
+    y_arr = np.asarray(y)
+    boot_rhos = []
+
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        boot_x = x_arr[idx]
+        boot_y = y_arr[idx]
+        boot_rho, _ = stats.spearmanr(boot_x, boot_y)
+        if not np.isnan(boot_rho):
+            boot_rhos.append(float(boot_rho))
+
+    if len(boot_rhos) < 10:
+        return float(rho), float(p_value), np.nan, np.nan
+
+    alpha = 1.0 - confidence
+    ci_low, ci_high = np.quantile(boot_rhos, [alpha / 2.0, 1.0 - alpha / 2.0])
+    return float(rho), float(p_value), float(ci_low), float(ci_high)
 
 
 def _prepare_group_data(
@@ -145,6 +166,44 @@ def _prepare_group_data(
     return plot_df, x_col, y_col, x_label, y_label
 
 
+def _filter_display_outliers(
+    df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    iqr_multiplier: float = 1.5,
+    min_points: int = 12,
+) -> tuple[pd.DataFrame, int]:
+    """Filter extreme points for display only; keep full data for statistics."""
+    if len(df) < 8:
+        return df, 0
+
+    q1_x, q3_x = df[x_col].quantile(0.25), df[x_col].quantile(0.75)
+    q1_y, q3_y = df[y_col].quantile(0.25), df[y_col].quantile(0.75)
+    iqr_x = q3_x - q1_x
+    iqr_y = q3_y - q1_y
+
+    if np.isclose(iqr_x, 0.0) and np.isclose(iqr_y, 0.0):
+        return df, 0
+
+    low_x = q1_x - iqr_multiplier * iqr_x
+    high_x = q3_x + iqr_multiplier * iqr_x
+    low_y = q1_y - iqr_multiplier * iqr_y
+    high_y = q3_y + iqr_multiplier * iqr_y
+
+    keep_mask = (
+        (df[x_col] >= low_x)
+        & (df[x_col] <= high_x)
+        & (df[y_col] >= low_y)
+        & (df[y_col] <= high_y)
+    )
+    filtered_df = df.loc[keep_mask].copy()
+    removed = int((~keep_mask).sum())
+
+    if len(filtered_df) < max(3, min_points):
+        return df, 0
+    return filtered_df, removed
+
+
 def _plot_group_panel(
     ax: plt.Axes,
     plot_df: pd.DataFrame,
@@ -164,10 +223,13 @@ def _plot_group_panel(
         ax.set_axis_off()
         return
 
-    r, p_value, ci_low, ci_high = _pearson_ci(group_df[x_col], group_df[y_col])
+    rho, p_value, ci_low, ci_high = _spearman_stats_with_bootstrap_ci(group_df[x_col], group_df[y_col])
+
+    # Use filtered points for visualization while keeping stats on full group_df.
+    display_df, n_hidden = _filter_display_outliers(group_df, x_col, y_col)
 
     sns.regplot(
-        data=group_df,
+        data=display_df,
         x=x_col,
         y=y_col,
         ci=95,
@@ -189,10 +251,12 @@ def _plot_group_panel(
     ax.set_ylabel(y_label if show_ylabel else "")
 
     annotation = (
-        f"r = {r:.3f}\n"
+        f"rho = {rho:.3f}\n"
         f"95% CI = [{ci_low:.3f}, {ci_high:.3f}]\n"
         f"p = {p_value:.2e}"
     )
+    if n_hidden > 0:
+        annotation += f"\nshown = {len(display_df)}/{len(group_df)}"
     ax.text(
         0.04,
         0.96,
@@ -246,9 +310,11 @@ def build_species_pair_plot(
     species_a: str,
     species_b: str,
     output_dir: str,
-    transform: str = "log1p",
+    transform: str = "none",
 ) -> Path:
     ds = BioSmokeDataset()
+    ds.preprocess_taxonomy_data(transform=True)
+    ds.preprocess_metabolomics_data()
     df = ds.merge_to_dataframe()
     df = prepare_crc_diff_groups(df)
 
@@ -338,7 +404,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--transform",
         choices=["log1p", "none"],
-        default="log1p",
+        default="none",
         help="绘图前的数值变换方式",
     )
     return parser.parse_args()

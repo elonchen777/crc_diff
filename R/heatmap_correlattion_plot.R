@@ -9,6 +9,8 @@ merged_data <- fread("dataset/merged_dataset_processed.csv",
                      stringsAsFactors = FALSE, data.table = FALSE)
 output_dir <- "results/R_plots/heatmap_correlation_plot"
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+table_dir <- file.path(output_dir, "tables")
+if (!dir.exists(table_dir)) dir.create(table_dir, recursive = TRUE)
 
 merged_data$group <- with(merged_data, ifelse(
   crc_label == 0, "control",
@@ -57,11 +59,50 @@ simplify_name <- function(name) {
 }
 sp_labels <- sapply(available_cols, simplify_name)
 
+matrix_to_long <- function(r_mat, p_mat, group_name) {
+  idx <- upper.tri(r_mat, diag = FALSE)
+  out <- data.frame(
+    group = group_name,
+    feature_x = rownames(r_mat)[row(r_mat)[idx]],
+    feature_y = colnames(r_mat)[col(r_mat)[idx]],
+    rho = r_mat[idx],
+    p_value = p_mat[idx],
+    stringsAsFactors = FALSE
+  )
+
+  out$significance <- "ns"
+  out$significance[out$p_value < 0.05] <- "*"
+  out$significance[out$p_value < 0.01] <- "**"
+  out$significance[out$p_value < 0.001] <- "***"
+  out
+}
+
+save_group_tables <- function(group_name, r_mat, p_mat) {
+  write.csv(
+    as.data.frame(r_mat),
+    file.path(table_dir, paste0(group_name, "_spearman_r_matrix.csv")),
+    row.names = TRUE
+  )
+  write.csv(
+    as.data.frame(p_mat),
+    file.path(table_dir, paste0(group_name, "_spearman_p_matrix.csv")),
+    row.names = TRUE
+  )
+
+  long_df <- matrix_to_long(r_mat, p_mat, group_name)
+  write.csv(
+    long_df,
+    file.path(table_dir, paste0(group_name, "_spearman_long.csv")),
+    row.names = FALSE
+  )
+}
+
 make_corr_heatmap <- function(group_name, title_label, col_title_color) {
   df_g <- merged_data[merged_data$group == group_name, available_cols]
   colnames(df_g) <- sp_labels
   rc <- rcorr(as.matrix(df_g), type = "spearman")
   r <- rc$r; p <- rc$P
+  save_group_tables(group_name, r, p)
   
   # 星号矩阵
   sig_mat <- matrix("", nrow = nrow(r), ncol = ncol(r))
@@ -131,3 +172,4 @@ draw(ht_ctrl + ht_well + ht_poor,
      annotation_legend_list = list(lgd_sig))
 dev.off()
 message("Done: ", output_dir)
+message("Saved heatmap tables: ", table_dir)
