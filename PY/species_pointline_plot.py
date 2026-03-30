@@ -314,7 +314,7 @@ def build_species_pair_plot(
 ) -> Path:
     ds = BioSmokeDataset()
     ds.preprocess_taxonomy_data(transform=True)
-    ds.preprocess_metabolomics_data()
+    ds.preprocess_metabolomics_data(transform=True)
     df = ds.merge_to_dataframe()
     df = prepare_crc_diff_groups(df)
 

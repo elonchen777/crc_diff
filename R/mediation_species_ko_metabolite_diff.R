@@ -12,14 +12,27 @@ output_dir <- "results/R_plots/mediation_species_ko_metabolite_diff_group"
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 FIXED_KO_LIST <- c(
+  "K16388",
+  "K19509",
+  "K12688",
   "K02548",
+  "K12688",
+  "K02804",
+  "K07091",
   "K10200",
   "K10201",
   "K02114",
   "K01512",
   "K01647",
-  "K02804",
-  "K03785"
+  "K03785",
+  "K19507",
+  "K01585",
+  "K19506",
+  "K19508",
+  "K19507",
+  "K12528",
+  "K01512",
+  "K00797"
 )
 
 FIXED_SPECIES_LIST <- c(
@@ -30,7 +43,6 @@ FIXED_SPECIES_LIST <- c(
 FIXED_METABOLITES_LIST <- c(
   "SQDG 26:2; SQDG(13:1/13:1)",
   "Chenodeoxycholic acid sulfate",
-  "4-Hydroxy-5-(phenyl)-valeric acid-O-sulphate",
   "Cholesterol"
 )
 
@@ -380,12 +392,12 @@ for (i in seq_len(nrow(species_plot_specs))) {
   }
 }
 
-make_best_chain_plot <- function(best_row, species_slug) {
+make_chain_plot <- function(chain_row, species_slug, rank_idx = 1) {
   nd <- tibble(
     node = c("Species", "KO", "Metabolite", "DiffGroup"),
     x = c(1, 2, 3, 4),
     y = c(1, 1, 1, 1),
-    label = c(best_row$species_name, best_row$ko_name, best_row$metabolite_name, "diff_group")
+    label = c(chain_row$species_name, chain_row$ko_name, chain_row$metabolite_name, "diff_group")
   )
 
   ed <- tibble(
@@ -394,10 +406,10 @@ make_best_chain_plot <- function(best_row, species_slug) {
     y = c(1, 1, 1, 0.90),
     yend = c(1, 1, 1, 0.90),
     label = c(
-      paste0("a1=", round(best_row$a1, 3)),
-      paste0("d21=", round(best_row$d21, 3)),
-      paste0("b2=", round(best_row$b2, 3)),
-      paste0("c' =", round(best_row$c_prime, 3))
+      paste0("a1=", round(chain_row$a1, 3)),
+      paste0("d21=", round(chain_row$d21, 3)),
+      paste0("b2=", round(chain_row$b2, 3)),
+      paste0("c' =", round(chain_row$c_prime, 3))
     ),
     edge_type = c("main", "main", "main", "direct")
   )
@@ -430,8 +442,8 @@ make_best_chain_plot <- function(best_row, species_slug) {
       x = 2.5,
       y = 1.35,
       label = paste0(
-        "Serial indirect = ", round(best_row$serial_indirect, 4),
-        "\n95% CI [", round(best_row$serial_ci_low, 4), ", ", round(best_row$serial_ci_high, 4), "]"
+        "Serial indirect = ", round(chain_row$serial_indirect, 4),
+        "\n95% CI [", round(chain_row$serial_ci_low, 4), ", ", round(chain_row$serial_ci_high, 4), "]"
       ),
       size = 3.5,
       fontface = "bold"
@@ -439,7 +451,7 @@ make_best_chain_plot <- function(best_row, species_slug) {
     scale_linetype_manual(values = c(main = "solid", direct = "dashed"), guide = "none") +
     coord_cartesian(xlim = c(0.5, 4.5), ylim = c(0.65, 1.5), clip = "off") +
     labs(
-      title = paste0("Best serial mediation chain: ", species_slug),
+      title = paste0("Serial mediation chain: ", species_slug),
       subtitle = "species -> KO -> metabolite -> diff_group"
     ) +
     theme_void(base_size = 11) +
@@ -459,22 +471,25 @@ species_best_specs <- tibble(
 )
 
 for (i in seq_len(nrow(species_best_specs))) {
-  one_species_best <- res %>%
+  one_species_top5 <- res %>%
     filter(status == "ok", is.finite(serial_indirect), species == species_best_specs$species_col[i]) %>%
     arrange(desc(abs(serial_indirect))) %>%
-    slice_head(n = 1)
+    slice_head(n = 10)
 
-  if (nrow(one_species_best) == 0) next
+  if (nrow(one_species_top5) == 0) next
 
-  p2 <- make_best_chain_plot(
-    best_row = one_species_best,
-    species_slug = species_best_specs$species_slug[i]
-  )
+  for (j in seq_len(nrow(one_species_top5))) {
+    p2 <- make_chain_plot(
+      chain_row = one_species_top5[j, , drop = FALSE],
+      species_slug = species_best_specs$species_slug[i],
+      rank_idx = j
+    )
 
-  pdf_name <- paste0("serial_mediation_best_chain_", species_best_specs$species_slug[i], ".pdf")
-  png_name <- paste0("serial_mediation_best_chain_", species_best_specs$species_slug[i], ".png")
-  ggsave(file.path(output_dir, pdf_name), p2, width = 10.8, height = 4.6, device = cairo_pdf)
-  ggsave(file.path(output_dir, png_name), p2, width = 10.8, height = 4.6, dpi = 320)
+    pdf_name <- paste0("serial_mediation_top", j, "_chain_", species_best_specs$species_slug[i], ".pdf")
+    png_name <- paste0("serial_mediation_top", j, "_chain_", species_best_specs$species_slug[i], ".png")
+    ggsave(file.path(output_dir, pdf_name), p2, width = 10.8, height = 4.6, device = cairo_pdf)
+    ggsave(file.path(output_dir, png_name), p2, width = 10.8, height = 4.6, dpi = 320)
+  }
 }
 
 summary_txt <- file.path(output_dir, "serial_mediation_summary.txt")
